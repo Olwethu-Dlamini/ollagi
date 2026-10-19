@@ -6,7 +6,8 @@ A small, self-hosted control room for running Claude Code on my own machine:
 - follow and answer them from my phone over Tailscale (open a QR code, no app store app),
 - queue tasks to run one after another while I am away,
 - group similar tickets so they are solved together in one session,
-- never start more work than the machine's RAM can take.
+- never start more work than the machine's RAM can take,
+- show and manage the rest of the system too (memory, CPU, disks, heavy processes), with Claude Code as the main focus.
 
 It is built for my SiMedia work first, but nothing in it is tied to SiMedia: projects come from a config file.
 
@@ -18,9 +19,10 @@ Early. Built in small steps, one idea per commit, so every part can be read and 
 |------|------|-------|
 | 1 | Skeleton, decisions folder | done |
 | 2 | `ollagi doctor`: is it safe to start another session? | done |
-| 3 | Sessions in tmux: start, list, stop | planned |
-| 4 | Phone page over `tailscale serve`, `ollagi qr` | planned |
-| 5 | Overnight queue, one task at a time | planned |
+| 3 | Sessions in tmux: start, list, show, send, stop | done |
+| 4 | Web interface: sessions and system, usable on a phone | in progress |
+| 4b | Tailscale: `tailscale serve`, `ollagi qr` | planned |
+| 5 | RAM watcher (memory pressure) and overnight queue | planned |
 | 6 | Ticket batching from Jira | planned |
 | 7 | Projects from a config file | planned |
 
