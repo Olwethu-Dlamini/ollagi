@@ -16,7 +16,7 @@ Early. Built in small steps, one idea per commit, so every part can be read and 
 
 | Step | What | State |
 |------|------|-------|
-| 1 | Skeleton, decisions folder | in progress |
+| 1 | Skeleton, decisions folder | done |
 | 2 | `ollagi doctor`: is it safe to start another session? | planned |
 | 3 | Sessions in tmux: start, list, stop | planned |
 | 4 | Phone page over `tailscale serve`, `ollagi qr` | planned |
