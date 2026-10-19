@@ -84,10 +84,13 @@ def client(fake_sessions, available_gib=8.0, **config):
     return TestClient(app, base_url="http://127.0.0.1:8765")
 
 
-def test_the_page_is_served(fake_sessions):
-    response = client(fake_sessions).get("/")
-    assert response.status_code == 200
-    assert "<title>ollagi</title>" in response.text
+def test_the_page_and_its_three_files_are_served_and_nothing_else(fake_sessions):
+    c = client(fake_sessions)
+    assert "<title>ollagi</title>" in c.get("/").text
+    for name in ("style.css", "app.js", "ansi.js"):
+        assert c.get(f"/static/{name}").status_code == 200
+    assert c.get("/static/..%2Fweb.py").status_code == 404
+    assert c.get("/static/index.html").status_code == 404
 
 
 def test_system_reports_memory_processes_sessions_and_projects(fake_sessions):

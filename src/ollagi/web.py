@@ -107,6 +107,13 @@ def create_app(config: Config, machine=None, sessions_api=sessions, run_watcher=
     def page():
         return FileResponse(STATIC / "index.html")
 
+    @app.get("/static/{name}")
+    def static_file(name: str):
+        """The page's own files. Only these names are served, so no other file can be reached."""
+        if name not in {"style.css", "app.js", "ansi.js"}:
+            raise HTTPException(404, "no such file")
+        return FileResponse(STATIC / name)
+
     @app.get("/qr.svg")
     def qr_code():
         if not phone_url:

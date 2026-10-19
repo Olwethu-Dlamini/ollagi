@@ -94,3 +94,10 @@ the wrong thing; the test now checks a known amount (30 MiB).
 `systemctl --user freeze <unit>` writes 1 to the group's `cgroup.freeze`: every process in it stops
 being scheduled, keeps its memory and state, and continues on `thaw`. A frozen tmux cannot answer
 either, so ollagi reads a frozen session's state from the group's files, never from tmux.
+
+## Terminal colours (ANSI / SGR codes)
+
+Terminals colour text with escape codes: `ESC[31m` means red, `ESC[1m` bold, `ESC[0m` back to
+normal, `ESC[38;2;r;g;bm` an exact colour. `tmux capture-pane -e` keeps them. `static/ansi.js`
+reads them one by one, keeps the current style, and wraps each run of text in a `<span>` styled
+that way, always setting the text with `textContent` so nothing printed can run as code.
