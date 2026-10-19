@@ -1,3 +1,5 @@
+import tempfile
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -6,10 +8,16 @@ from fastapi.testclient import TestClient
 from ollagi.budget import GIB
 from ollagi.config import Config, Project
 from ollagi.processes import Proc
+from ollagi.queue import Store
 from ollagi.sessions import SessionInfo
 from ollagi.system import MIB, Disk, Load, Memory, Pressure
 
 CHANGE = {"X-Ollagi": "1"}
+
+
+def temp_store():
+    """A queue database in a fresh temporary folder, so tests never touch the real queue."""
+    return Store(Path(tempfile.mkdtemp()) / "q.db")
 
 
 class FakeSessions:
@@ -80,7 +88,7 @@ def client(fake_sessions, available_gib=8.0, **config):
     from ollagi.web import create_app
 
     cfg = Config(projects=(Project("simedia", "/work/DATA!"),), **config)
-    app = create_app(cfg, machine=machine(available_gib), sessions_api=fake_sessions)
+    app = create_app(cfg, machine=machine(available_gib), sessions_api=fake_sessions, queue_store=temp_store())
     return TestClient(app, base_url="http://127.0.0.1:8765")
 
 
@@ -175,7 +183,7 @@ def test_the_watcher_reads_scopes_and_freezes_through_the_sessions_module(fake_s
     """Runs the server's own watcher read and act functions, as the background thread does."""
     from ollagi.web import create_app
 
-    app = create_app(Config(), machine=machine(available_gib=0.5), sessions_api=fake_sessions)
+    app = create_app(Config(), machine=machine(available_gib=0.5), sessions_api=fake_sessions, queue_store=temp_store())
     w, read, act = app.state.watcher, app.state.watcher_read, app.state.watcher_act
     available, pressure, states = read()
     assert [(x.name, x.frozen) for x in states] == [("demo", False)]
@@ -193,7 +201,8 @@ def test_qr_code_is_an_svg_of_the_phone_address(fake_sessions):
 
     if not shutil.which("qrencode"):
         pytest.skip("qrencode not installed")
-    app = create_app(Config(), machine=machine(), sessions_api=fake_sessions, phone_url="http://box.tail1.ts.net")
+    app = create_app(Config(), machine=machine(), sessions_api=fake_sessions, phone_url="http://box.tail1.ts.net",
+                     queue_store=temp_store())
     response = TestClient(app, base_url="http://127.0.0.1:8765").get("/qr.svg")
     assert response.status_code == 200
     assert response.headers["content-type"] == "image/svg+xml"
@@ -201,8 +210,6 @@ def test_qr_code_is_an_svg_of_the_phone_address(fake_sessions):
 
 
 def test_a_session_waiting_on_a_permission_shows_its_question_and_choices(fake_sessions):
-    from pathlib import Path
-
     fixture = Path(__file__).parent / "fixtures" / "collie" / "claude--permission-bash.txt"
     fake_sessions.screens["demo"] = fixture.read_text()
     c = client(fake_sessions)
@@ -216,3 +223,21 @@ def test_a_session_waiting_on_a_permission_shows_its_question_and_choices(fake_s
 def test_sessions_are_grouped_under_their_configured_project(fake_sessions):
     fake_sessions.running = {"sd-1": "/work/DATA!/Admin-Api"}
     assert client(fake_sessions).get("/api/sessions").json()[0]["project"] == "simedia"
+
+
+def test_tasks_are_added_listed_cancelled_and_the_queue_paused(fake_sessions, tmp_path):
+    c = client(fake_sessions)
+    added = c.post("/api/queue", json={"directory": str(tmp_path), "prompt": "fix it"}, headers=CHANGE).json()
+    assert added["status"] == "queued"
+    assert c.get("/api/queue").json()["tasks"][0]["prompt"] == "fix it"
+    assert c.post(f"/api/queue/{added['id']}/cancel", headers=CHANGE).json()["status"] == "cancelled"
+    assert c.post(f"/api/queue/{added['id']}/cancel", headers=CHANGE).status_code == 409
+    c.post("/api/queue/pause", headers=CHANGE)
+    assert c.get("/api/queue").json()["paused"] is True
+    c.post("/api/queue/resume", headers=CHANGE)
+    assert c.get("/api/queue").json()["paused"] is False
+
+
+def test_a_task_needs_a_real_folder(fake_sessions):
+    c = client(fake_sessions)
+    assert c.post("/api/queue", json={"directory": "/nope", "prompt": "x"}, headers=CHANGE).status_code == 400

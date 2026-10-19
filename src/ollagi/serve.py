@@ -35,7 +35,7 @@ def run(args) -> int:
     if net:
         print(f"tailnet: {net.host}, only {settings.allowed_login} may connect through tailscale serve")
     print(f"RAM watcher: {settings.watcher.action} the heaviest session after {settings.watcher.red_seconds:.0f} s of red")
-    app = create_app(settings, run_watcher=True, phone_url=net.url() if net else None)
+    app = create_app(settings, run_watcher=True, run_queue=True, phone_url=net.url() if net else None)
     uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")
     return 0
 

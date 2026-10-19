@@ -10,6 +10,11 @@
     POST /api/sessions/{name}/freeze    pause it (nothing lost)
     POST /api/sessions/{name}/thaw      continue it
     GET  /api/watcher                   the RAM watcher's level, setting and recent events
+    GET  /api/queue                     the overnight queue: tasks, paused or not, recent events
+    POST /api/queue                     add a task        {"directory", "prompt"}
+    POST /api/queue/{id}/cancel         cancel a queued task
+    POST /api/queue/pause | /resume     hold or release the queue
+    GET  /api/queue/{id}/result         a finished task's final screen, as text
     GET  /qr.svg                        the phone address as a QR code
 
 `create_app` receives the machine readers and the sessions module as arguments. The real server
@@ -28,7 +33,9 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel
 
-from ollagi import access, claude_screen, sessions, system, watcher as watching
+from collections import deque
+
+from ollagi import access, claude_screen, queue as queueing, sessions, system, watcher as watching
 from ollagi.budget import Limits, how_many_can_start
 from ollagi.config import Config
 from ollagi.processes import find_sessions, read_processes
@@ -58,9 +65,29 @@ class SendRequest(BaseModel):
     key: str | None = None
 
 
-def create_app(config: Config, machine=None, sessions_api=sessions, run_watcher=False, phone_url=None) -> FastAPI:
+class TaskRequest(BaseModel):
+    directory: str
+    prompt: str
+
+
+def create_app(config: Config, machine=None, sessions_api=sessions, run_watcher=False, phone_url=None,
+               queue_store=None, run_queue=False, command_for=None, results_dir=None) -> FastAPI:
     machine = machine or real_machine()
     watcher = watching.Watcher(config.watcher)
+    store = queue_store or queueing.Store()
+    queue_events: deque = deque(maxlen=50)
+
+    def room_for_a_task() -> bool:
+        """The queue may start a task only when the budget says one fits and the watcher is green."""
+        if watcher.level != "green":
+            return False
+        result = how_many_can_start(machine.memory(), machine.load(),
+                                    [s.tree_rss for s in find_sessions(machine.processes())], Limits())
+        return result.can_start > 0
+
+    runner = queueing.Runner(store, sessions_api, room=room_for_a_task,
+                             **({"command_for": command_for} if command_for else {}),
+                             **({"results_dir": results_dir} if results_dir else {}))
 
     def read_for_watcher():
         """What the watcher needs, read without asking tmux (a frozen session's tmux cannot answer)."""
@@ -82,6 +109,9 @@ def create_app(config: Config, machine=None, sessions_api=sessions, run_watcher=
             threading.Thread(
                 target=watching.run_forever, args=(watcher, read_for_watcher, act_for_watcher, stop), daemon=True
             ).start()
+        if run_queue:
+            note = lambda text: queue_events.append({"time": time.time(), "text": text})  # noqa: E731
+            threading.Thread(target=queueing.run_forever, args=(runner, note, stop), daemon=True).start()
         yield
         stop.set()
 
@@ -90,6 +120,7 @@ def create_app(config: Config, machine=None, sessions_api=sessions, run_watcher=
     # Kept on the app so tests can drive exactly what the background thread runs.
     app.state.watcher_read = read_for_watcher
     app.state.watcher_act = act_for_watcher
+    app.state.queue_runner = runner
 
     @app.middleware("http")
     async def check_access(request: Request, call_next):
@@ -243,6 +274,48 @@ def create_app(config: Config, machine=None, sessions_api=sessions, run_watcher=
         _require_session(sessions_api, name)
         sessions_api.stop(name)
         return {"stopped": name}
+
+    @app.get("/api/queue")
+    def queue_state():
+        return {
+            "paused": store.paused(),
+            "pause_reason": store.pause_reason(),
+            "tasks": [{**asdict(t), "project": project_of(t.directory)} for t in reversed(store.all())],
+            "events": list(queue_events)[-20:],
+        }
+
+    @app.post("/api/queue")
+    def add_task(body: TaskRequest):
+        try:
+            return asdict(store.add(body.directory, body.prompt))
+        except ValueError as error:
+            raise HTTPException(400, str(error)) from error
+
+    @app.post("/api/queue/{task_id}/cancel")
+    def cancel_task(task_id: int):
+        try:
+            return asdict(store.cancel(task_id))
+        except KeyError as error:
+            raise HTTPException(404, f"no task {task_id}") from error
+        except ValueError as error:
+            raise HTTPException(409, str(error)) from error
+
+    @app.post("/api/queue/pause")
+    def pause_queue():
+        store.set_paused(True, "paused by hand")
+        return {"paused": True}
+
+    @app.post("/api/queue/resume")
+    def resume_queue():
+        store.set_paused(False)
+        return {"paused": False}
+
+    @app.get("/api/queue/{task_id}/result")
+    def task_result(task_id: int):
+        path = runner.results_dir / f"task-{task_id}.txt"
+        if not path.exists():
+            raise HTTPException(404, f"no saved result for task {task_id}")
+        return {"id": task_id, "text": path.read_text()}
 
     @app.post("/api/sessions/{name}/freeze")
     def freeze(name: str):
