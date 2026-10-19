@@ -1,0 +1,2 @@
+# Test fixtures are exact copies of real screens: store their bytes unchanged (no line-ending conversion).
+tests/fixtures/** -text
