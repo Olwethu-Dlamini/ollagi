@@ -146,6 +146,20 @@
   </div>
 </div>
 
+<!-- ===== A session started in a terminal window: its conversation, and Take over ========= -->
+<div class="backdrop" id="outside-sheet" hidden>
+  <div class="sheet" style="max-height:90vh">
+    <h2 id="outside-title"></h2>
+    <p class="muted mono" id="outside-sub"></p>
+    <div id="outside-items" class="convo"></div>
+    <p class="muted" id="outside-note">Started in a terminal window, so it can be read here but not typed into.
+      Take over ends it in its window and reopens the same conversation in ollagi, where it can be answered from here.</p>
+    <div class="error" id="outside-error"></div>
+    <button class="primary" id="outside-takeover">Take over</button>
+    <button class="plain" id="outside-close">Close</button>
+  </div>
+</div>
+
 <!-- ===== Phone QR (a sheet) ============================================================== -->
 <div class="backdrop" id="qr-sheet" hidden>
   <div class="sheet" style="text-align:center; justify-items:center">

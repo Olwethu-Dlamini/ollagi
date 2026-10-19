@@ -38,7 +38,9 @@ class FakeSessions:
     def screen(self, name, lines=200, colours=False):
         return self.screens.get(name, "Claude is waiting for you")
 
-    def start(self, name, directory):
+    def start(self, name, directory, command=("claude",)):
+        self.commands = getattr(self, "commands", {})
+        self.commands[name] = list(command)
         if name in self.running:
             raise ValueError(f"a session called {name} is already running")
         self.running[name] = directory
@@ -113,12 +115,40 @@ def temp_outbox(helper=None):
     return Outbox(Path(tempfile.mkdtemp()) / "q.db", helper=Path("/fake/slack.sh"), run=helper or fake)
 
 
-def client(fake_sessions, available_gib=8.0, jira=None, outbox=None, **config):
+class FakeOutside:
+    """Stands in for ollagi.outside: one invented session started in a terminal, pid 900."""
+
+    def __init__(self, status="idle"):
+        from ollagi.outside import OutsideSession
+
+        self.session = OutsideSession(900, "conv-1", "work-12", "/work/DATA!/api", status, 1000.0, 2000.0)
+        self.ended = []
+
+    def list_sessions(self):
+        return [] if self.ended else [self.session]
+
+    def transcript_path(self, session_id):
+        return Path("/nowhere.jsonl")
+
+    def read_tail(self, path):
+        return ['{"type": "user", "message": {"content": "hello"}}']
+
+    def parse_conversation(self, lines):
+        from ollagi.outside import parse_conversation
+
+        return parse_conversation(lines)
+
+    def end_process(self, pid):
+        self.ended.append(pid)
+        return True
+
+
+def client(fake_sessions, available_gib=8.0, jira=None, outbox=None, outside_api=None, **config):
     from ollagi.web import create_app
 
     cfg = Config(projects=(Project("simedia", "/work/DATA!"),), **config)
     app = create_app(cfg, machine=machine(available_gib), sessions_api=fake_sessions, queue_store=temp_store(),
-                     jira_client=jira or FakeJira(), outbox=outbox or temp_outbox())
+                     jira_client=jira or FakeJira(), outbox=outbox or temp_outbox(), outside_api=outside_api or FakeOutside())
     return TestClient(app, base_url="http://127.0.0.1:8765")
 
 
@@ -321,3 +351,28 @@ def test_queue_events_become_drafts_only_when_a_channel_is_configured(fake_sessi
     app = create_app(Config(), machine=machine(), sessions_api=fake_sessions, queue_store=temp_store(), outbox=quiet)
     app.state.note_queue_event("task 3 done")
     assert quiet.all() == []
+
+
+def test_sessions_started_outside_ollagi_are_listed_with_their_conversation(fake_sessions):
+    c = client(fake_sessions)
+    [s] = c.get("/api/outside").json()
+    assert (s["name"], s["state"], s["project"]) == ("work-12", "done", "simedia")
+    assert c.get("/api/outside/900/conversation").json()["items"] == [{"role": "you", "text": "hello"}]
+    assert c.get("/api/outside/1/conversation").status_code == 404
+
+
+def test_take_over_needs_the_exact_name_and_an_idle_session(fake_sessions):
+    busy = FakeOutside(status="busy")
+    c = client(fake_sessions, outside_api=busy)
+    assert c.post("/api/outside/900/takeover", json={"confirm_name": "work-12"}, headers=CHANGE).status_code == 409
+    assert busy.ended == []
+
+    idle = FakeOutside()
+    c = client(fake_sessions, outside_api=idle)
+    assert c.post("/api/outside/900/takeover", json={"confirm_name": "work"}, headers=CHANGE).status_code == 409
+    assert idle.ended == []
+    done = c.post("/api/outside/900/takeover", json={"confirm_name": "work-12"}, headers=CHANGE).json()
+    assert idle.ended == [900]
+    assert done["session"] == "api-12"  # folder name plus the old name's ending
+    assert fake_sessions.running["api-12"] == "/work/DATA!/api"
+    assert fake_sessions.commands["api-12"] == ["claude", "--resume", "conv-1"]  # the same conversation

@@ -17,6 +17,9 @@
     GET  /api/queue/{id}/result         a finished task's final screen, as text
     GET  /api/jira/groups               my open Jira tickets, grouped (read only, cached 5 minutes)
     POST /api/jira/queue                queue chosen tickets as one task {"keys", "directory"}
+    GET  /api/outside                   Claude sessions started outside ollagi (from Claude's own files)
+    GET  /api/outside/{pid}/conversation   that session's recent conversation, read only
+    POST /api/outside/{pid}/takeover    end it in its window, reopen it in ollagi {"confirm_name"}
     GET  /api/slack/drafts              the Slack outbox
     POST /api/slack/drafts              add a draft       {"channel", "text", "thread_ts"}
     POST /api/slack/drafts/{id}/edit | /preview | /discard
@@ -41,7 +44,7 @@ from pydantic import BaseModel
 
 from collections import deque
 
-from ollagi import access, claude_screen, grouping, queue as queueing, sessions, slack_outbox, system, watcher as watching
+from ollagi import access, claude_screen, grouping, outside, queue as queueing, sessions, slack_outbox, system, watcher as watching
 from ollagi.budget import Limits, how_many_can_start
 from ollagi.config import Config
 from ollagi.processes import find_sessions, read_processes
@@ -96,13 +99,20 @@ class EditRequest(BaseModel):
 class SendDraftRequest(BaseModel):
     confirmed_text: str
 
+
+class TakeoverRequest(BaseModel):
+    confirm_name: str
+
+# Claude Code's own status words for a session, as the page's state dots.
+OUTSIDE_STATE = {"busy": "working", "waiting": "needs_you", "idle": "done"}
+
 # Queue events worth a Slack draft, when [slack] drafts_to is set (never sent without me).
 DRAFT_WORTHY = (" done", "waiting for you", "usage limit", "failed")
 
 
 def create_app(config: Config, machine=None, sessions_api=sessions, run_watcher=False, phone_url=None,
                queue_store=None, run_queue=False, command_for=None, results_dir=None, jira_client=None,
-               outbox=None) -> FastAPI:
+               outbox=None, outside_api=outside) -> FastAPI:
     machine = machine or real_machine()
     watcher = watching.Watcher(config.watcher)
     store = queue_store or queueing.Store()
@@ -390,6 +400,51 @@ def create_app(config: Config, machine=None, sessions_api=sessions, run_watcher=
             return asdict(store.add(body.directory, grouping.prompt_for(chosen)))
         except ValueError as error:
             raise HTTPException(400, str(error)) from error
+
+    def outside_sessions():
+        managed = {s.pid for s in find_sessions(machine.processes()) if _is_managed(machine, s.pid)}
+        memory = {s.pid: s.tree_rss for s in find_sessions(machine.processes())}
+        return [s for s in outside_api.list_sessions() if s.pid not in managed], memory
+
+    @app.get("/api/outside")
+    def list_outside():
+        found, memory = outside_sessions()
+        now = time.time()
+        return [{**asdict(s), "state": OUTSIDE_STATE.get(s.status, "unknown"), "project": project_of(s.cwd),
+                 "memory": memory.get(s.pid), "age_seconds": int(now - s.started)} for s in found]
+
+    def find_outside(pid: int):
+        found, _ = outside_sessions()
+        match = next((s for s in found if s.pid == pid), None)
+        if match is None:
+            raise HTTPException(404, f"no Claude session with pid {pid} outside ollagi")
+        return match
+
+    @app.get("/api/outside/{pid}/conversation")
+    def outside_conversation(pid: int):
+        s = find_outside(pid)
+        path = outside_api.transcript_path(s.session_id)
+        if path is None:
+            return {"title": None, "items": []}
+        title, items = outside_api.parse_conversation(outside_api.read_tail(path))
+        return {"title": title, "items": [asdict(i) for i in items]}
+
+    @app.post("/api/outside/{pid}/takeover")
+    def take_over(pid: int, body: TakeoverRequest):
+        s = find_outside(pid)
+        if body.confirm_name != s.name:
+            raise HTTPException(409, "the typed name does not match; nothing was changed")
+        if s.status != "idle":
+            raise HTTPException(409, f"{s.name} is {s.status}; only an idle session can be taken over")
+        new_name = sessions.name_for(s.cwd, sessions_api.names(), s.name.rsplit("-", 1)[-1])
+        if not outside_api.end_process(s.pid):
+            raise HTTPException(500, f"{s.name} did not end within 10 s; nothing was reopened")
+        try:
+            sessions_api.start(new_name, s.cwd, ["claude", "--resume", s.session_id])
+        except (ValueError, RuntimeError) as error:
+            raise HTTPException(500, f"{s.name} ended, but reopening failed: {error}. "
+                                     f"Reopen it by hand: cd '{s.cwd}' && claude --resume {s.session_id}") from error
+        return {"session": new_name, "attach": f"tmux -L ollagi-{new_name} attach"}
 
     @app.get("/api/slack/drafts")
     def list_drafts():

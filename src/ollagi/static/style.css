@@ -171,3 +171,11 @@ textarea { width: 100%; padding: 12px; border-radius: 10px; border: 1px solid va
 .draft .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; align-items: center; }
 .draft .actions button { padding: 8px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--raised); font: 13px var(--mono); }
 .draft .actions .send-draft { border-color: var(--accent); color: var(--accent); }
+
+/* ---- sessions started in a terminal window --------------------------------------------------- */
+.row .tag { font: 11px var(--mono); color: var(--muted); border: 1px solid var(--line); border-radius: 6px; padding: 1px 6px; margin-left: 6px; }
+.convo { overflow: auto; max-height: 50vh; display: grid; gap: 8px; }
+.convo .msg { padding: 10px 12px; border-radius: 10px; white-space: pre-wrap; word-break: break-word; font-size: 14px; }
+.convo .you { background: var(--raised); justify-self: end; max-width: 90%; }
+.convo .claude { background: var(--bg); border: 1px solid var(--line); }
+.convo .tool { font: 12px var(--mono); color: var(--muted); padding: 2px 4px; }

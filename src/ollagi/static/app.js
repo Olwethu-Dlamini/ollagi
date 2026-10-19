@@ -45,6 +45,8 @@ const STATES = {
 
 // ---- page state ----------------------------------------------------------------------------
 let whoami = null, phoneUrl = null, sessions = [], projects = [], filter = "All", current = null;
+let outsideSessions = [];  // Claude sessions started in a terminal window, from Claude's own files
+let claudeProcesses = [];  // every Claude process the server sees (from /api/system)
 
 // ---- top bar and tabs ------------------------------------------------------------------------
 function showView(name) {
@@ -66,8 +68,16 @@ $("qr-close").onclick = () => ($("qr-sheet").hidden = true);
 
 // ---- sessions (home) ------------------------------------------------------------------------
 function renderSessions() {
+  // Claude processes that are neither ollagi's nor in Claude's own session files (rare). Drawn here,
+  // after both lists are loaded: the two requests run at the same time and either may finish first.
+  const known = new Set(outsideSessions.map((o) => o.pid));
+  const others = claudeProcesses.filter((c) => !c.managed && !known.has(c.pid));
+  $("outside").textContent = others.length ? `Also running: ${others.length} other Claude process(es).` : "";
+
+  // Both kinds share one list: ollagi's own sessions, and those started in a terminal window.
+  const all = [...sessions, ...outsideSessions.map((o) => ({ ...o, outside: true }))];
   const counts = {};
-  for (const s of sessions) counts[s.state] = (counts[s.state] || 0) + 1;
+  for (const s of all) counts[s.state] = (counts[s.state] || 0) + 1;
 
   $("summary").replaceChildren(...Object.keys(STATES).filter((k) => counts[k]).map((k) => {
     const item = el("span", null, `${k}-count`);
@@ -76,10 +86,10 @@ function renderSessions() {
   }));
 
   // Project filter chips: All, then every project that has a session, marked with its most urgent dot.
-  const names = [...new Set(sessions.map((s) => s.project))];
+  const names = [...new Set(all.map((s) => s.project))];
   $("filters").replaceChildren(...["All", ...names].map((name) => {
     const button = el("button", null, filter === name ? "on" : "");
-    const mine = sessions.filter((s) => s.project === name);
+    const mine = all.filter((s) => s.project === name);
     if (name !== "All" && mine.length) button.append(el("span", null, `dot ${mostUrgent(mine)}`));
     button.append(name);
     button.onclick = () => { filter = name; renderSessions(); };
@@ -87,7 +97,7 @@ function renderSessions() {
   }));
   $("filters").hidden = names.length < 2;
 
-  const shown = sessions.filter((s) => filter === "All" || s.project === filter);
+  const shown = all.filter((s) => filter === "All" || s.project === filter);
   if (!shown.length) {
     $("groups").replaceChildren(el("div", "No sessions yet. Press + New to start Claude in a project.", "empty"));
     return;
@@ -116,6 +126,7 @@ function rank(state) { return Object.keys(STATES).indexOf(state); }
 function mostUrgent(list) { return list.map((s) => s.state).sort((a, b) => rank(a) - rank(b))[0]; }
 
 function sessionRow(s) {
+  if (s.outside) return outsideRow(s);
   const row = el("button", null, `row ${s.state}`);
   const sub = s.state === "needs_you" && s.question ? s.question : `${STATES[s.state]} · ${s.directory}`;
   const meta = el("span", null, "meta");
@@ -123,6 +134,49 @@ function sessionRow(s) {
   row.append(el("span", null, `dot ${s.state}`), el("span", s.name, "name"), meta, el("span", sub, "sub"));
   row.onclick = () => openViewer(s.name);
   return row;
+}
+
+// ---- sessions started in a terminal window ------------------------------------------------------
+const OUTSIDE_WORD = { busy: "working", waiting: "waiting for you", idle: "idle" };
+
+function outsideRow(s) {
+  const row = el("button", null, `row ${s.state}`);
+  const name = el("span", s.name, "name");
+  name.append(el("span", "terminal", "tag"));
+  const meta = el("span", null, "meta");
+  meta.append(age(s.age_seconds), el("br"), mib(s.memory));
+  row.append(el("span", null, `dot ${s.state}`), name, meta,
+             el("span", `${OUTSIDE_WORD[s.status] || s.status} · ${s.cwd}`, "sub"));
+  row.onclick = () => openOutside(s.pid);
+  return row;
+}
+
+async function openOutside(pid) {
+  const s = outsideSessions.find((x) => x.pid === pid);
+  if (!s) return;
+  $("outside-error").textContent = "";
+  $("outside-sheet").hidden = false;
+  $("outside-sub").textContent = `${s.name} · ${OUTSIDE_WORD[s.status] || s.status} · ${s.cwd}`;
+  $("outside-takeover").hidden = s.status !== "idle";  // idle only: never cut off work in progress
+  $("outside-takeover").onclick = () => takeOver(s);
+  const c = await api(`/api/outside/${pid}/conversation`);
+  $("outside-title").textContent = c.title || s.name;
+  $("outside-items").replaceChildren(...c.items.map((i) => el("div", i.text, `msg ${i.role}`)));
+  $("outside-items").scrollTop = $("outside-items").scrollHeight;
+}
+$("outside-close").onclick = () => ($("outside-sheet").hidden = true);
+
+async function takeOver(s) {
+  const typed = prompt(
+    `Take over ${s.name}?\n\nClaude in its terminal window ends, and the same conversation reopens in ollagi.\n` +
+    `If this is the window you are typing in right now, that window's session ends.\n\nType the name to confirm:`);
+  if (typed === null) return;
+  try {
+    const r = await api(`/api/outside/${s.pid}/takeover`, { confirm_name: typed.trim() });
+    $("outside-sheet").hidden = true;
+    await refreshSessions();
+    alert(`Reopened as ${r.session}. To see it in a terminal window again: ${r.attach}`);
+  } catch (error) { $("outside-error").textContent = error.message; }
 }
 
 // ---- new session sheet ------------------------------------------------------------------------
@@ -470,10 +524,7 @@ async function refreshSystem() {
   $("load").textContent = `${s.load.one_minute.toFixed(2)} on ${s.load.cpus} threads`;
   $("verdict").textContent = (s.can_start ? `Room for ${s.can_start} more session(s). ` : "No room for another session. ") + s.reason;
 
-  const others = s.claude_sessions.filter((c) => !c.managed);
-  $("outside").textContent = others.length
-    ? `Also running outside ollagi: ${others.length} Claude session(s), ${mib(others.reduce((n, c) => n + c.tree_rss, 0))} in total.`
-    : "";
+  claudeProcesses = s.claude_sessions;
 
   $("disks").replaceChildren(...s.disks.map((d) => {
     const row = el("tr");
@@ -507,7 +558,7 @@ async function refreshWatcher() {
 }
 
 async function refreshSessions() {
-  sessions = await api("/api/sessions");
+  [sessions, outsideSessions] = await Promise.all([api("/api/sessions"), api("/api/outside")]);
   renderSessions();
 }
 
@@ -518,6 +569,7 @@ async function tick() {
     const jobs = [refreshSystem(), refreshSessions(), refreshWatcher()];
     if (!$("view-queue").hidden) jobs.push(refreshQueue());
     await Promise.all(jobs);
+    renderSessions();  // once more, now that every list is in
   } catch (error) {
     $("chip-memory-text").textContent = "offline";
   }
