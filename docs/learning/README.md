@@ -39,3 +39,25 @@ record says so and points back to the old one.
   over its whole tree, because the builds and tests are usually heavier than `claude` itself.
 - RSS (resident set size, `VmRSS` in `/proc/<pid>/status`) is the RAM a process holds right now.
   Shared libraries are counted in every process that uses them, so a tree's total is a little high.
+
+## tmux
+
+tmux runs programs inside a "server" that stays alive when you close the terminal. You can attach
+to it later (`tmux -L <socket> attach`) and see the same screen. Two features make it useful from
+code: `capture-pane -p` prints what is on the screen, and `send-keys` types into it as if you were
+at the keyboard. `-L <name>` picks which server (socket) a command talks to.
+
+## systemd scopes and cgroups
+
+Linux groups processes into control groups (cgroups), folders under `/sys/fs/cgroup`. Each group
+reports its memory (`memory.current` now, `memory.peak` the most it ever used) and can be frozen
+(`cgroup.freeze`), which pauses every process in it without losing anything. systemd manages these
+groups as units; `systemd-run --scope` puts a command we start into a new unit of its own.
+`systemctl --user status ollagi-<name>.scope` shows one of ours.
+
+## Fakes in tests
+
+Code that runs outside programs (tmux, systemctl) takes the "run a command" function as a
+parameter. Tests pass a fake that writes down the commands instead of running them, so they can
+check *which* commands would run. One test still starts a real session, with a harmless shell
+script instead of claude, to prove the real commands work together.
