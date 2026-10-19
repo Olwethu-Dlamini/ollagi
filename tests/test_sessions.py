@@ -34,7 +34,8 @@ def test_start_runs_tmux_in_a_scope_inside_the_sessions_own_slice():
     assert "--unit=ollagi-sd\\x2d6641" in argv
     assert "--slice=app-ollagi-sd\\x2d6641.slice" in argv
     tmux_part = argv[argv.index("tmux"):]
-    assert tmux_part[:3] == ["tmux", "-L", "ollagi-sd-6641"]
+    assert tmux_part[:2] == ["tmux", "-f"] and tmux_part[2].endswith("tmux.conf")
+    assert tmux_part[3:5] == ["-L", "ollagi-sd-6641"]
     assert tmux_part[-2:] == ["--", "claude"]
     assert ["-c", "/work/repo"] == tmux_part[tmux_part.index("-c"):tmux_part.index("-c") + 2]
 
@@ -44,6 +45,19 @@ def test_dashes_are_escaped_so_one_sessions_slice_never_nests_inside_another():
     # app-ollagi-sd.slice: freezing a session called "sd" would freeze this one too.
     assert sessions.slice_unit("sd-6641") == "app-ollagi-sd\\x2d6641.slice"
     assert sessions.slice_unit("sd") == "app-ollagi-sd.slice"
+
+
+def test_session_names_come_from_the_folder():
+    assert sessions.name_for("/work/Admin-Frontend", [], "3f2a") == "admin-frontend-3f2a"
+    assert sessions.name_for("/run/media/oll/Linux/SIMEDIA/DATA!", [], "01") == "data-01"
+    assert sessions.name_for("/", [], "01") == "session-01"
+    assert sessions.check_name(sessions.name_for("/x/Über Projekt (2)", [], "a1"))
+
+
+def test_ollagi_tmux_settings_free_ctrl_b_for_claude_and_make_esc_instant():
+    conf = sessions.TMUX_CONF.read_text()
+    assert "set -g prefix C-]" in conf and "unbind C-b" in conf
+    assert "set -g escape-time 10" in conf
 
 
 def test_text_is_sent_literally_then_enter_is_pressed():

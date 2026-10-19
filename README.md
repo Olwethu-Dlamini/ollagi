@@ -28,6 +28,8 @@ Early. Built in small steps, one idea per commit, so every part can be read and 
 | 6 | Jira: group my open tickets (read only), queue a group as one task | done |
 | 6b | Slack outbox: drafts, one approved Send per message | done |
 | 7 | Projects from a config file | done |
+| 8 | `claude` in a terminal starts through ollagi (`ollagi here`) | done |
+| 8b | See and take over sessions started outside ollagi | in progress |
 
 ## Try it
 

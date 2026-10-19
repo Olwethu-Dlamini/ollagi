@@ -116,3 +116,11 @@ same moment can break it, so every database method in `queue.py` takes a lock fi
 - Union-find joins things into groups through links: every ticket starts as its own group, and
   each link merges two groups. If A is like B and B is like C, A, B and C end up together even if
   A and C look nothing alike. That is why a group's reason may list its links.
+
+## exec, and a shell function that wraps a command
+
+- `os.execvp` replaces the running program with another one in the same process. `ollagi here`
+  starts the session, then becomes `tmux attach`, so the terminal is simply looking at the session.
+- A shell function with the same name as a command runs instead of it. Inside the function,
+  `command claude` means "the real claude, not this function", which is how the wrapper passes
+  everything that is not an interactive chat straight through.

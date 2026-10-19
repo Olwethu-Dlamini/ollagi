@@ -37,6 +37,7 @@ NAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{0,31}$")
 ALLOWED_KEYS = {"Enter", "Escape", "C-c", "Up", "Down", "Left", "Right", "Tab", "BTab", "Space", "BSpace", "y", "n",
                 *"123456789"}
 CGROUP_ROOT = Path("/sys/fs/cgroup")
+TMUX_CONF = Path(__file__).parent / "tmux.conf"  # ollagi's own tmux settings (see the file)
 STATE_DIR = Path.home() / ".local" / "share" / "ollagi" / "sessions"
 
 Run = Callable[[Sequence[str]], subprocess.CompletedProcess]
@@ -95,8 +96,21 @@ def start_command(name: str, directory: str, command: Sequence[str]) -> list[str
         f"--unit={scope_unit(name).removesuffix('.scope')}",
         f"--slice={slice_unit(name)}",
         f"--description=ollagi session {name}",
-        *tmux(name, "new-session", "-d", "-s", WINDOW, "-x", "200", "-y", "50", "-c", directory, "--", *command),
+        "tmux", "-f", str(TMUX_CONF), "-L", socket_name(name),
+        "new-session", "-d", "-s", WINDOW, "-x", "200", "-y", "50", "-c", directory, "--", *command,
     ]
+
+
+def attach_command(name: str) -> list[str]:
+    """Show a session in the current terminal (leave it running with Ctrl-] then d)."""
+    return tmux(name, "attach-session", "-t", WINDOW)
+
+
+def name_for(directory: str, taken: list[str], suffix: str) -> str:
+    """A session name from the folder: "/work/Admin-Frontend" -> "admin-frontend-3f2a"."""
+    base = re.sub(r"[^a-z0-9-]+", "-", Path(directory).name.lower()).strip("-")[:24] or "session"
+    name = f"{base}-{suffix}"
+    return name if name not in taken else f"{base}-{suffix}x"
 
 
 def start(name: str, directory: str, command: Sequence[str] = ("claude",), run: Run = run_command) -> None:
