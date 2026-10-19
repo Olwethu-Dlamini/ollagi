@@ -149,13 +149,13 @@ def test_whoami_names_the_tailscale_login_or_this_machine(fake_sessions):
     assert c.get("/api/whoami", headers={"Tailscale-User-Login": "me@example.com"}).json() == {"login": "me@example.com"}
 
 
-def test_a_frozen_session_refuses_screen_and_typing_until_thawed(fake_sessions):
+def test_a_frozen_session_says_so_and_refuses_typing_until_thawed(fake_sessions):
     c = client(fake_sessions)
     assert c.post("/api/sessions/demo/freeze", headers=CHANGE).status_code == 200
-    assert c.get("/api/sessions/demo/screen").status_code == 409
+    assert c.get("/api/sessions/demo/screen").json() == {"name": "demo", "frozen": True, "text": None}
     assert c.post("/api/sessions/demo/send", json={"text": "hi"}, headers=CHANGE).status_code == 409
     assert c.post("/api/sessions/demo/thaw", headers=CHANGE).status_code == 200
-    assert c.get("/api/sessions/demo/screen").status_code == 200
+    assert c.get("/api/sessions/demo/screen").json()["frozen"] is False
 
 
 def test_watcher_state_is_reported(fake_sessions):

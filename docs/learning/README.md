@@ -77,3 +77,20 @@ script instead of claude, to prove the real commands work together.
 A unit file (`deploy/ollagi.service`) tells systemd how to run a program: the command, what to do
 if it crashes (`Restart=on-failure`) and when to start it (`WantedBy=default.target`, at login).
 `systemctl --user` manages services that run as me, without root.
+
+## Slices, and why tmux needed one (decision 0009)
+
+A slice is a systemd group that holds other groups. Names nest by dashes: `app-ollagi-x.slice`
+lives inside `app-ollagi.slice`, which lives inside `app.slice`. That is why session names escape
+their dashes as `\x2d`.
+
+tmux on this machine moves each program it starts into a scope of its own (`tmux-spawn-<id>.scope`),
+but inside the slice the tmux server runs in. So the session's slice is the one group that holds
+both tmux and Claude. Lesson: a test that only checked "memory is above zero" passed while measuring
+the wrong thing; the test now checks a known amount (30 MiB).
+
+## Freezing
+
+`systemctl --user freeze <unit>` writes 1 to the group's `cgroup.freeze`: every process in it stops
+being scheduled, keeps its memory and state, and continues on `thaw`. A frozen tmux cannot answer
+either, so ollagi reads a frozen session's state from the group's files, never from tmux.

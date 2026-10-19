@@ -170,8 +170,10 @@ def create_app(config: Config, machine=None, sessions_api=sessions, run_watcher=
     @app.get("/api/sessions/{name}/screen")
     def screen(name: str, lines: int = 200):
         _require_session(sessions_api, name)
-        _refuse_if_frozen(sessions_api, name)
-        return {"name": name, "text": sessions_api.screen(name, lines=min(max(lines, 10), 2000))}
+        if sessions_api.scope_state(name)[0]:
+            # Not an error: the session is fine, its tmux is just paused and cannot draw the screen.
+            return {"name": name, "frozen": True, "text": None}
+        return {"name": name, "frozen": False, "text": sessions_api.screen(name, lines=min(max(lines, 10), 2000))}
 
     @app.post("/api/sessions")
     def start_session(body: StartRequest):

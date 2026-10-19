@@ -296,14 +296,12 @@ async function refreshScreen() {
   const atBottom = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 30;
   try {
     const data = await api(`/api/sessions/${current}/screen?lines=300`);
-    $("frozen-note").hidden = true;
+    // A frozen session cannot draw its screen (its tmux is paused too), so keep the last text.
+    $("frozen-note").hidden = !data.frozen;
+    if (data.frozen) return;
     pre.textContent = data.text;
     if (atBottom) pre.scrollTop = pre.scrollHeight;  // follow new output unless you scrolled up to read
-  } catch (error) {
-    // A frozen session cannot show its screen (its tmux is paused too); keep the last text.
-    if (error.message.includes("frozen")) $("frozen-note").hidden = false;
-    else pre.textContent = error.message;
-  }
+  } catch (error) { pre.textContent = error.message; }
 }
 
 function openViewer(name) {
