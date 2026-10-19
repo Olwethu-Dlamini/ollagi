@@ -29,3 +29,13 @@ record says so and points back to the old one.
 - Load average (`/proc/loadavg`) is the average number of tasks running or waiting for a CPU. With
   8 CPU threads, a load of 8 means every thread is busy; above that, work queues up.
 - The code parses the *text* of these files in pure functions, so tests can use sample text.
+
+## Processes, parents and process trees
+
+- Every running program is a process with a number (pid). Every process except the first has a
+  parent (ppid): the process that started it. When Claude runs `dotnet test`, that `dotnet` is a
+  child (or grandchild, through a shell) of the `claude` process.
+- Following children from one process gives its process tree. ollagi counts a session's memory
+  over its whole tree, because the builds and tests are usually heavier than `claude` itself.
+- RSS (resident set size, `VmRSS` in `/proc/<pid>/status`) is the RAM a process holds right now.
+  Shared libraries are counted in every process that uses them, so a tree's total is a little high.
