@@ -277,10 +277,12 @@ $("stop").onclick = async () => {
 };
 
 // ---- keep the page fresh ------------------------------------------------------------------------
+let whoami = null;
 async function tick() {
   try {
     await Promise.all([refreshSystem(), refreshSessions()]);
-    $("status").textContent = "updated " + new Date().toLocaleTimeString();
+    if (!whoami) whoami = (await api("/api/whoami")).login;
+    $("status").textContent = `${whoami} · updated ${new Date().toLocaleTimeString()}`;
   } catch (error) { $("status").textContent = "offline: " + error.message; }
 }
 tick();

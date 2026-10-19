@@ -71,6 +71,11 @@ def create_app(config: Config, machine=None, sessions_api=sessions) -> FastAPI:
     def page():
         return FileResponse(STATIC / "index.html")
 
+    @app.get("/api/whoami")
+    def whoami(request: Request):
+        """Who this request comes from: a Tailscale login, or "this machine" for local requests."""
+        return {"login": request.headers.get("tailscale-user-login") or "this machine"}
+
     @app.get("/api/system")
     def system_state():
         memory, load, procs = machine.memory(), machine.load(), machine.processes()
