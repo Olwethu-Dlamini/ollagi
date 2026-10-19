@@ -142,3 +142,14 @@ td:last-child { text-align: right; font-family: var(--mono); }
         background: var(--surface); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,.4); }
 .menu button { padding: 12px 14px; border: 0; border-bottom: 1px solid var(--line); background: transparent; text-align: left; }
 .menu button:last-child { border-bottom: 0; color: var(--needs); }
+
+/* ---- queue -------------------------------------------------------------------------------- */
+textarea { width: 100%; padding: 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg);
+           color: var(--text); font: 14px/1.4 var(--mono); resize: vertical; }
+.card select, .card input { width: 100%; padding: 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); }
+.task .sub { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.task .actions { grid-column: 2 / span 2; display: flex; gap: 8px; margin-top: 6px; }
+.task .actions button { padding: 6px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--raised); font: 12px var(--mono); }
+.dot.failed { background: var(--needs); }
+.dot.limited { background: var(--working); }
+.dot.cancelled { background: var(--line); }

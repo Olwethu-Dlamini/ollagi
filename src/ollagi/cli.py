@@ -6,7 +6,7 @@ the terminal into a call to that function, so there is no extra package to learn
 
 import argparse
 
-from ollagi import __version__, doctor, serve, session_commands
+from ollagi import __version__, doctor, queue_commands, serve, session_commands
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -20,6 +20,7 @@ def build_parser() -> argparse.ArgumentParser:
     doctor.add_to(subparsers)
     session_commands.add_to(subparsers)
     serve.add_to(subparsers)
+    queue_commands.add_to(subparsers)
     return parser
 
 

@@ -31,6 +31,30 @@
   <p class="muted" id="outside"></p>
 </main>
 
+<!-- ===== Queue: tasks that run one at a time while you are away ========================== -->
+<main id="view-queue" hidden>
+  <section class="card">
+    <div class="kv"><span id="queue-status">…</span><button class="plain" id="queue-toggle">Pause</button></div>
+    <p class="muted" id="queue-reason"></p>
+  </section>
+
+  <section class="card">
+    <h2>Add a task</h2>
+    <form id="task-form" style="display:grid; gap:8px">
+      <select id="task-project"></select>
+      <input id="task-dir" placeholder="or a folder path" autocapitalize="off">
+      <textarea id="task-prompt" rows="4" placeholder="What should Claude do? e.g. Fix the failing unit test in budget.py and explain the cause." required></textarea>
+      <div class="error" id="task-error"></div>
+      <button class="primary" type="submit">Add to queue</button>
+    </form>
+    <p class="muted">Tasks start one at a time, only when there is memory to spare and the RAM watcher is green.
+      A finished task's last screen is saved and its session stopped, so memory is free for the next one.</p>
+  </section>
+
+  <div id="tasks"></div>
+  <ul class="events" id="queue-events"></ul>
+</main>
+
 <!-- ===== System: the machine, the watcher, disks, processes ============================ -->
 <main id="view-system" hidden>
   <section class="card" id="qr-card" hidden>
@@ -75,6 +99,7 @@
 
 <nav class="tabs">
   <button data-view="sessions" class="on">Sessions</button>
+  <button data-view="queue">Queue</button>
   <button data-view="system">System</button>
 </nav>
 <button class="fab" id="new-open">+ New</button>
@@ -91,6 +116,15 @@
     <button class="primary" type="submit">Start Claude</button>
     <button class="plain" type="button" id="new-cancel">Cancel</button>
   </form>
+</div>
+
+<!-- ===== A finished task's saved screen (a sheet) ======================================== -->
+<div class="backdrop" id="result-sheet" hidden>
+  <div class="sheet" style="max-height:85vh">
+    <h2 id="result-title"></h2>
+    <pre id="result-text" style="margin:0; overflow:auto; max-height:60vh; padding:10px; border-radius:10px; background:var(--screen-bg); color:var(--screen-text); font:12px/1.4 var(--mono); white-space:pre-wrap"></pre>
+    <button class="plain" id="result-close">Close</button>
+  </div>
 </div>
 
 <!-- ===== Phone QR (a sheet) ============================================================== -->

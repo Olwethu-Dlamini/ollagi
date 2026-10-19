@@ -101,3 +101,10 @@ Terminals colour text with escape codes: `ESC[31m` means red, `ESC[1m` bold, `ES
 normal, `ESC[38;2;r;g;bm` an exact colour. `tmux capture-pane -e` keeps them. `static/ansi.js`
 reads them one by one, keeps the current style, and wraps each run of text in a `<span>` styled
 that way, always setting the text with `textContent` so nothing printed can run as code.
+
+## SQLite, threads and a lock
+
+SQLite is a database in one file, built into Python (`sqlite3`). The queue's server thread and the
+web page's requests both use it, from different threads. Two threads inside one connection at the
+same moment can break it, so every database method in `queue.py` takes a lock first
+(`threading.RLock`): one thread at a time, the others wait their turn for a few microseconds.

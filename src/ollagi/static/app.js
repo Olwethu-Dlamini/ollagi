@@ -49,9 +49,9 @@ let whoami = null, phoneUrl = null, sessions = [], projects = [], filter = "All"
 // ---- top bar and tabs ------------------------------------------------------------------------
 function showView(name) {
   for (const b of document.querySelectorAll(".tabs button")) b.classList.toggle("on", b.dataset.view === name);
-  $("view-sessions").hidden = name !== "sessions";
-  $("view-system").hidden = name !== "system";
+  for (const view of ["sessions", "queue", "system"]) $(`view-${view}`).hidden = name !== view;
   $("new-open").hidden = name !== "sessions";
+  if (name === "queue") refreshQueue();
 }
 for (const b of document.querySelectorAll(".tabs button")) b.onclick = () => showView(b.dataset.view);
 $("chip-memory").onclick = () => showView("system");
@@ -142,11 +142,13 @@ $("new-form").onsubmit = async (event) => {
 };
 
 function fillProjects() {
-  const select = $("new-project");
-  if (select.dataset.filled) return;
-  select.append(Object.assign(el("option", "choose a project…"), { value: "" }));
-  for (const p of projects) select.append(Object.assign(el("option", `${p.name}  (${p.directory})`), { value: p.directory }));
-  select.dataset.filled = "1";
+  for (const id of ["new-project", "task-project"]) {
+    const select = $(id);
+    if (select.dataset.filled) continue;
+    select.append(Object.assign(el("option", "choose a project…"), { value: "" }));
+    for (const p of projects) select.append(Object.assign(el("option", `${p.name}  (${p.directory})`), { value: p.directory }));
+    select.dataset.filled = "1";
+  }
 }
 
 // ---- one session ------------------------------------------------------------------------------
@@ -282,6 +284,75 @@ $("v-stop").onclick = async () => {
   closeViewer();
 };
 
+// ---- queue -----------------------------------------------------------------------------------
+// A task's status, shown with the same dots as sessions where the meaning matches.
+const TASK = {
+  queued: ["idle", "queued"], running: ["working", "running"], waiting: ["needs_you", "waiting for you"],
+  done: ["done", "done"], failed: ["failed", "failed"], limited: ["limited", "usage limit"], cancelled: ["cancelled", "cancelled"],
+};
+
+async function refreshQueue() {
+  const q = await api("/api/queue");
+  const active = q.tasks.find((t) => t.status === "running" || t.status === "waiting");
+  const waiting = q.tasks.filter((t) => t.status === "queued").length;
+  $("queue-status").textContent = q.paused ? `Paused · ${waiting} queued`
+    : active ? `Running task ${active.id} · ${waiting} queued` : `Ready · ${waiting} queued`;
+  $("queue-reason").textContent = q.paused ? q.pause_reason : "";
+  $("queue-toggle").textContent = q.paused ? "Resume" : "Pause";
+  $("queue-toggle").onclick = async () => { await api(`/api/queue/${q.paused ? "resume" : "pause"}`, {}); refreshQueue(); };
+
+  $("tasks").replaceChildren(...(q.tasks.length ? [taskList(q.tasks)] : [el("div", "No tasks yet. Add one above.", "empty")]));
+  $("queue-events").replaceChildren(...q.events.slice(-5).reverse().map((e) =>
+    el("li", new Date(e.time * 1000).toLocaleTimeString() + "  " + e.text)));
+}
+
+function taskList(tasks) {
+  const box = el("div", null, "list");
+  for (const t of tasks) {
+    const [dot, word] = TASK[t.status] || ["unknown", t.status];
+    const row = el("div", null, "row task");
+    const when = t.finished || t.started || t.created;
+    const meta = el("span", null, "meta");
+    meta.append(`#${t.id}`, el("br"), age(Math.max(0, Math.round(Date.now() / 1000 - when))));
+    const sub = `${word} · ${t.project}` + (t.note ? ` · ${t.note}` : "");
+    row.append(el("span", null, `dot ${dot}`), el("span", t.prompt, "name"), meta, el("span", sub, "sub"));
+    const actions = el("div", null, "actions");
+    if (t.status === "queued") actions.append(button("Cancel", async () => { await api(`/api/queue/${t.id}/cancel`, {}); refreshQueue(); }));
+    if (t.status === "running" || t.status === "waiting") actions.append(button("Open session", () => openViewer(t.session)));
+    if (t.status === "done") actions.append(button("Result", () => showResult(t.id)));
+    if (actions.children.length) row.append(actions);
+    box.append(row);
+  }
+  return box;
+}
+
+function button(text, onclick) {
+  const b = el("button", text);
+  b.type = "button";
+  b.onclick = onclick;
+  return b;
+}
+
+async function showResult(id) {
+  const r = await api(`/api/queue/${id}/result`);
+  $("result-title").textContent = `Task ${id}`;
+  $("result-text").textContent = r.text;
+  $("result-sheet").hidden = false;
+}
+$("result-close").onclick = () => ($("result-sheet").hidden = true);
+
+$("task-form").onsubmit = async (event) => {
+  event.preventDefault();
+  $("task-error").textContent = "";
+  const directory = $("task-dir").value.trim() || $("task-project").value;
+  if (!directory) { $("task-error").textContent = "Choose a project or type a folder."; return; }
+  try {
+    await api("/api/queue", { directory, prompt: $("task-prompt").value });
+    $("task-prompt").value = "";
+    refreshQueue();
+  } catch (error) { $("task-error").textContent = error.message; }
+};
+
 // ---- system ----------------------------------------------------------------------------------
 const LEVEL_WORD = { green: "green", amber: "amber", red: "red" };
 
@@ -344,7 +415,9 @@ async function refreshSessions() {
 async function tick() {
   try {
     if (!whoami) whoami = (await api("/api/whoami")).login;
-    await Promise.all([refreshSystem(), refreshSessions(), refreshWatcher()]);
+    const jobs = [refreshSystem(), refreshSessions(), refreshWatcher()];
+    if (!$("view-queue").hidden) jobs.push(refreshQueue());
+    await Promise.all(jobs);
   } catch (error) {
     $("chip-memory-text").textContent = "offline";
   }
