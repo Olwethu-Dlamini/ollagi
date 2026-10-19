@@ -9,13 +9,19 @@ How one session is laid out (docs/decisions/0005 explains why):
 tmux keeps the program running when no terminal is attached, and lets us read the screen
 (`capture-pane`) and type into it (`send-keys`) from code, which is what the web page does.
 
+A session can be frozen (the RAM watcher does this). Freezing pauses every process in the scope,
+the tmux server included, so a frozen session's tmux would never answer. Code that only needs to
+know about a session therefore reads the scope's files and the saved session record, never tmux.
+
 Every outside command goes through `run`, a function passed in. Tests pass a fake that records the
 commands instead of running them, so the logic is checked without starting tmux or systemd.
 """
 
+import json
 import os
 import re
 import subprocess
+import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,6 +32,7 @@ NAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{0,31}$")
 # Keys the page may press. Anything else is refused, so a request cannot send arbitrary tmux keys.
 ALLOWED_KEYS = {"Enter", "Escape", "C-c", "Up", "Down", "Left", "Right", "Tab", "BTab", "y", "n", "1", "2", "3"}
 CGROUP_ROOT = Path("/sys/fs/cgroup")
+STATE_DIR = Path.home() / ".local" / "share" / "ollagi" / "sessions"
 
 Run = Callable[[Sequence[str]], subprocess.CompletedProcess]
 
@@ -44,6 +51,7 @@ class SessionInfo:
     alive: bool  # False once the program in the window has exited
     memory_current: int | None  # bytes, from the scope's cgroup; None if unknown
     memory_peak: int | None
+    frozen: bool = False
 
 
 def check_name(name: str) -> str:
@@ -80,6 +88,21 @@ def start(name: str, directory: str, command: Sequence[str] = ("claude",), run: 
     result = run(start_command(name, directory, command))
     if result.returncode != 0:
         raise RuntimeError(f"could not start {name}: {result.stderr.strip()}")
+    save_record(name, {"directory": directory, "command": list(command), "created": int(time.time())})
+
+
+def save_record(name: str, record: dict, state_dir: Path | None = None) -> None:
+    """Remember a session's folder and start time in a small JSON file, readable even when frozen."""
+    folder = state_dir or STATE_DIR
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / f"{check_name(name)}.json").write_text(json.dumps(record))
+
+
+def load_record(name: str, state_dir: Path | None = None) -> dict:
+    try:
+        return json.loads(((state_dir or STATE_DIR) / f"{check_name(name)}.json").read_text())
+    except (FileNotFoundError, ValueError):
+        return {}
 
 
 def names(socket_dir: Path | None = None, run: Run = run_command) -> list[str]:
@@ -90,8 +113,11 @@ def names(socket_dir: Path | None = None, run: Run = run_command) -> list[str]:
     found = []
     for sock in sorted(folder.glob(PREFIX + "*")):
         name = sock.name.removeprefix(PREFIX)
-        # A socket file can outlive its server; has-session asks the server itself.
-        if NAME_PATTERN.match(name) and run(tmux(name, "has-session", "-t", WINDOW)).returncode == 0:
+        if not NAME_PATTERN.match(name):
+            continue
+        # A frozen server cannot answer, so check the scope first. Otherwise a socket file can
+        # outlive its server; has-session asks the server itself.
+        if scope_state(name, run=run)[0] or run(tmux(name, "has-session", "-t", WINDOW)).returncode == 0:
             found.append(name)
     return found
 
@@ -102,27 +128,54 @@ def parse_display(name: str, text: str) -> tuple[str, int, int, bool]:
     return directory, int(pid), int(created), dead != "1"
 
 
-def info(name: str, run: Run = run_command, cgroup_root: Path = CGROUP_ROOT) -> SessionInfo:
+def info(name: str, run: Run = run_command, cgroup_root: Path = CGROUP_ROOT, state_dir: Path | None = None) -> SessionInfo:
+    frozen, current, peak = scope_state(name, run=run, cgroup_root=cgroup_root)
+    if frozen:
+        record = load_record(name, state_dir)
+        return SessionInfo(name, record.get("directory", "?"), 0, record.get("created", 0), True, current, peak, True)
     shown = run(tmux(name, "display-message", "-p", "-t", WINDOW, "#{pane_pid}|#{session_created}|#{pane_dead}|#{pane_current_path}"))
     directory, pid, created, alive = parse_display(name, shown.stdout)
-    current, peak = scope_memory(name, run=run, cgroup_root=cgroup_root)
-    return SessionInfo(name, directory, pid, created, alive, current, peak)
+    return SessionInfo(name, directory, pid, created, alive, current, peak, False)
 
 
-def scope_memory(name: str, run: Run = run_command, cgroup_root: Path = CGROUP_ROOT) -> tuple[int | None, int | None]:
-    """Read memory.current and memory.peak from the session's systemd scope, if it has one."""
+def scope_folder(name: str, run: Run = run_command, cgroup_root: Path = CGROUP_ROOT) -> Path | None:
+    """The cgroup folder of the session's systemd scope, or None if it has no scope."""
     unit = socket_name(name) + ".scope"
     group = run(["systemctl", "--user", "show", "-p", "ControlGroup", "--value", unit]).stdout.strip()
-    if not group:
-        return None, None
-    folder = cgroup_root / group.lstrip("/")
-    values = []
-    for file in ("memory.current", "memory.peak"):
+    return cgroup_root / group.lstrip("/") if group else None
+
+
+def parse_events(text: str) -> bool:
+    """cgroup.events holds lines like "populated 1" and "frozen 0"."""
+    return any(line.split() == ["frozen", "1"] for line in text.splitlines())
+
+
+def scope_state(name: str, run: Run = run_command, cgroup_root: Path = CGROUP_ROOT) -> tuple[bool, int | None, int | None]:
+    """(frozen, memory.current, memory.peak) read from the scope's files; no tmux involved."""
+    folder = scope_folder(name, run=run, cgroup_root=cgroup_root)
+    if folder is None:
+        return False, None, None
+
+    def number(file: str) -> int | None:
         try:
-            values.append(int((folder / file).read_text()))
+            return int((folder / file).read_text())
         except (FileNotFoundError, ValueError):
-            values.append(None)
-    return values[0], values[1]
+            return None
+
+    try:
+        frozen = parse_events((folder / "cgroup.events").read_text())
+    except FileNotFoundError:
+        frozen = False
+    return frozen, number("memory.current"), number("memory.peak")
+
+
+def freeze(name: str, run: Run = run_command) -> None:
+    """Pause every process of the session. Nothing is lost; thaw() continues where it stopped."""
+    run(["systemctl", "--user", "freeze", socket_name(name) + ".scope"])
+
+
+def thaw(name: str, run: Run = run_command) -> None:
+    run(["systemctl", "--user", "thaw", socket_name(name) + ".scope"])
 
 
 def screen(name: str, lines: int = 200, run: Run = run_command) -> str:
@@ -146,6 +199,8 @@ def send_key(name: str, key: str, run: Run = run_command) -> None:
 
 def stop(name: str, run: Run = run_command, socket_dir: Path | None = None) -> None:
     """End the session: stopping its tmux server ends the program in it, and the scope with it."""
+    if scope_state(name, run=run)[0]:
+        thaw(name, run=run)  # a frozen tmux server cannot receive kill-server
     run(tmux(name, "kill-server"))
     # tmux can leave its socket file behind; remove it so the folder only lists live sessions.
     folder = socket_dir or Path(f"/tmp/tmux-{os.getuid()}")
