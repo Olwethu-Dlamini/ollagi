@@ -6,7 +6,7 @@ the terminal into a call to that function, so there is no extra package to learn
 
 import argparse
 
-from ollagi import __version__, doctor
+from ollagi import __version__, doctor, session_commands
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -18,6 +18,7 @@ def build_parser() -> argparse.ArgumentParser:
     # Each module that provides a subcommand adds itself here, one per step of the build.
     subparsers = parser.add_subparsers(dest="command", metavar="<command>")
     doctor.add_to(subparsers)
+    session_commands.add_to(subparsers)
     return parser
 
 
