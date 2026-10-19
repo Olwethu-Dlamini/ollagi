@@ -75,6 +75,19 @@
 </header>
 
 <main>
+  <section id="phone-card" class="wide" hidden>
+    <h2>Open on your phone</h2>
+    <div style="display:flex; gap:16px; align-items:center; flex-wrap:wrap">
+      <img id="qr-inline" alt="QR code of the phone address" width="180" height="180"
+           style="background:#fff; padding:8px; border-radius:8px; image-rendering:pixelated">
+      <div>
+        <p style="margin:0 0 6px"><strong id="phone-url-inline"></strong></p>
+        <p class="muted" style="margin:0">Point the phone camera at the code. The phone needs the Tailscale app,
+        signed in to the same account. This card only shows on the laptop itself.</p>
+      </div>
+    </div>
+  </section>
+
   <section id="machine">
     <h2>Machine</h2>
     <div class="row"><span>Memory available</span><span id="mem-text"></span></div>
@@ -235,6 +248,12 @@ let phoneUrl = null;
 async function refreshWatcher() {
   const w = await api("/api/watcher");
   phoneUrl = w.phone_url;
+  // Show the QR code inline when the page is opened on the laptop (no Tailscale login on the request).
+  if (phoneUrl && whoami === "this machine" && $("phone-card").hidden) {
+    $("qr-inline").src = "/qr.svg";
+    $("phone-url-inline").textContent = phoneUrl;
+    $("phone-card").hidden = false;
+  }
   $("watch-level").replaceChildren(el("span", w.level, "pill " + LEVEL_CLASS[w.level]));
   $("watch-action").textContent = w.action + " the heaviest session" + (w.frozen_by_watcher.length ? ` (frozen now: ${w.frozen_by_watcher.join(", ")})` : "");
   const events = w.events.slice(-5).reverse();
@@ -337,8 +356,8 @@ $("stop").onclick = async () => {
 let whoami = null;
 async function tick() {
   try {
-    await Promise.all([refreshSystem(), refreshSessions(), refreshWatcher()]);
     if (!whoami) whoami = (await api("/api/whoami")).login;
+    await Promise.all([refreshSystem(), refreshSessions(), refreshWatcher()]);
     $("status").textContent = `${whoami} · updated ${new Date().toLocaleTimeString()}`;
   } catch (error) { $("status").textContent = "offline: " + error.message; }
 }
