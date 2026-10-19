@@ -4,14 +4,20 @@ version = "0.1.0"
 description = "A small self-hosted control room for Claude Code sessions: tmux, Tailscale, a queue and a RAM check."
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "fastapi>=0.147.0",
+    "uvicorn>=0.54.0",
+]
 
 # `uv run ollagi ...` (or `ollagi` once installed) calls main() in src/ollagi/cli.py.
 [project.scripts]
 ollagi = "ollagi.cli:main"
 
 [dependency-groups]
-dev = ["pytest>=8"]
+dev = [
+    "httpx>=0.28.1",
+    "pytest>=8",
+]
 
 [build-system]
 requires = ["uv_build>=0.8,<0.13"]
