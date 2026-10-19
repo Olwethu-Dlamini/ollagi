@@ -1,10 +1,14 @@
 """Start, list, read, type into and stop Claude Code sessions kept alive in tmux.
 
-How one session is laid out (docs/decisions/0005 explains why):
+How one session is laid out (docs/decisions/0009 explains why; it replaces the layout in 0005):
 
-    systemd scope  ollagi-<name>.scope      a group systemd can measure, freeze or kill as one
-      tmux server  socket "ollagi-<name>"   its own server, so the scope holds only this session
-        session "main", one window         runs `claude` in the project folder
+    systemd slice  app-ollagi-<name>.slice      the group we measure, freeze and let oomd kill
+      scope        ollagi-<name>.scope          holds the tmux server (socket "ollagi-<name>")
+      scope        tmux-spawn-<id>.scope        tmux puts each program it starts in its own scope,
+                                                inside the same slice; this one runs `claude`
+
+The slice, not the scope, is the session: tmux moves the program it starts out of the server's
+scope (tmux is built with systemd support here), but it stays in the server's slice.
 
 tmux keeps the program running when no terminal is attached, and lets us read the screen
 (`capture-pane`) and type into it (`send-keys`) from code, which is what the web page does.
@@ -64,6 +68,21 @@ def socket_name(name: str) -> str:
     return PREFIX + check_name(name)
 
 
+def escaped(name: str) -> str:
+    """systemd reads "-" in a slice name as nesting (a-b.slice lives inside a.slice), so a session
+    called "sd-6641" would sit inside the slice of a session called "sd". "\\x2d" is systemd's way
+    of writing a dash that is just a dash."""
+    return check_name(name).replace("-", "\\x2d")
+
+
+def slice_unit(name: str) -> str:
+    return f"app-ollagi-{escaped(name)}.slice"
+
+
+def scope_unit(name: str) -> str:
+    return f"ollagi-{escaped(name)}.scope"
+
+
 def tmux(name: str, *args: str) -> list[str]:
     return ["tmux", "-L", socket_name(name), *args]
 
@@ -72,10 +91,9 @@ def start_command(name: str, directory: str, command: Sequence[str]) -> list[str
     """The full command line that starts a session (built separately so tests can read it)."""
     return [
         "systemd-run", "--user", "--scope", "--quiet",
-        f"--unit={socket_name(name)}",
+        f"--unit={scope_unit(name).removesuffix('.scope')}",
+        f"--slice={slice_unit(name)}",
         f"--description=ollagi session {name}",
-        # If systemd-oomd must kill something under memory pressure, prefer this session.
-        "-p", "ManagedOOMMemoryPressure=kill",
         *tmux(name, "new-session", "-d", "-s", WINDOW, "-x", "200", "-y", "50", "-c", directory, "--", *command),
     ]
 
@@ -88,6 +106,8 @@ def start(name: str, directory: str, command: Sequence[str] = ("claude",), run: 
     result = run(start_command(name, directory, command))
     if result.returncode != 0:
         raise RuntimeError(f"could not start {name}: {result.stderr.strip()}")
+    # If systemd-oomd must kill something under memory pressure, let it pick inside this session.
+    run(["systemctl", "--user", "set-property", "--runtime", slice_unit(name), "ManagedOOMMemoryPressure=kill"])
     save_record(name, {"directory": directory, "command": list(command), "created": int(time.time())})
 
 
@@ -139,9 +159,8 @@ def info(name: str, run: Run = run_command, cgroup_root: Path = CGROUP_ROOT, sta
 
 
 def scope_folder(name: str, run: Run = run_command, cgroup_root: Path = CGROUP_ROOT) -> Path | None:
-    """The cgroup folder of the session's systemd scope, or None if it has no scope."""
-    unit = socket_name(name) + ".scope"
-    group = run(["systemctl", "--user", "show", "-p", "ControlGroup", "--value", unit]).stdout.strip()
+    """The cgroup folder of the session's slice, or None if it has none."""
+    group = run(["systemctl", "--user", "show", "-p", "ControlGroup", "--value", slice_unit(name)]).stdout.strip()
     return cgroup_root / group.lstrip("/") if group else None
 
 
@@ -151,7 +170,7 @@ def parse_events(text: str) -> bool:
 
 
 def scope_state(name: str, run: Run = run_command, cgroup_root: Path = CGROUP_ROOT) -> tuple[bool, int | None, int | None]:
-    """(frozen, memory.current, memory.peak) read from the scope's files; no tmux involved."""
+    """(frozen, memory.current, memory.peak) read from the slice's files; no tmux involved."""
     folder = scope_folder(name, run=run, cgroup_root=cgroup_root)
     if folder is None:
         return False, None, None
@@ -171,11 +190,11 @@ def scope_state(name: str, run: Run = run_command, cgroup_root: Path = CGROUP_RO
 
 def freeze(name: str, run: Run = run_command) -> None:
     """Pause every process of the session. Nothing is lost; thaw() continues where it stopped."""
-    run(["systemctl", "--user", "freeze", socket_name(name) + ".scope"])
+    run(["systemctl", "--user", "freeze", slice_unit(name)])
 
 
 def thaw(name: str, run: Run = run_command) -> None:
-    run(["systemctl", "--user", "thaw", socket_name(name) + ".scope"])
+    run(["systemctl", "--user", "thaw", slice_unit(name)])
 
 
 def screen(name: str, lines: int = 200, run: Run = run_command) -> str:
@@ -202,6 +221,8 @@ def stop(name: str, run: Run = run_command, socket_dir: Path | None = None) -> N
     if scope_state(name, run=run)[0]:
         thaw(name, run=run)  # a frozen tmux server cannot receive kill-server
     run(tmux(name, "kill-server"))
+    # Stopping the slice ends anything still inside it and removes the slice itself.
+    run(["systemctl", "--user", "stop", slice_unit(name)])
     # tmux can leave its socket file behind; remove it so the folder only lists live sessions.
     folder = socket_dir or Path(f"/tmp/tmux-{os.getuid()}")
     (folder / socket_name(name)).unlink(missing_ok=True)

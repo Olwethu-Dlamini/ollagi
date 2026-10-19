@@ -7,21 +7,28 @@
     POST /api/sessions                  start a session   {"name", "directory", "force"}
     POST /api/sessions/{name}/send      type into it      {"text"} or {"key"}
     POST /api/sessions/{name}/stop      stop it
+    POST /api/sessions/{name}/freeze    pause it (nothing lost)
+    POST /api/sessions/{name}/thaw      continue it
+    GET  /api/watcher                   the RAM watcher's level, setting and recent events
+    GET  /qr.svg                        the phone address as a QR code
 
 `create_app` receives the machine readers and the sessions module as arguments. The real server
 passes the real ones; tests pass fakes, so the API is tested without touching this laptop.
 """
 
+import subprocess
+import threading
 import time
+from contextlib import asynccontextmanager
 from dataclasses import asdict
 from pathlib import Path
 from types import SimpleNamespace
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel
 
-from ollagi import access, sessions, system
+from ollagi import access, sessions, system, watcher as watching
 from ollagi.budget import Limits, how_many_can_start
 from ollagi.config import Config
 from ollagi.processes import find_sessions, read_processes
@@ -51,9 +58,38 @@ class SendRequest(BaseModel):
     key: str | None = None
 
 
-def create_app(config: Config, machine=None, sessions_api=sessions) -> FastAPI:
+def create_app(config: Config, machine=None, sessions_api=sessions, run_watcher=False, phone_url=None) -> FastAPI:
     machine = machine or real_machine()
-    app = FastAPI(title="ollagi", docs_url=None, redoc_url=None)
+    watcher = watching.Watcher(config.watcher)
+
+    def read_for_watcher():
+        """What the watcher needs, read without asking tmux (a frozen session's tmux cannot answer)."""
+        states = []
+        for name in sessions_api.names():
+            frozen, current, _peak = sessions_api.scope_state(name)
+            states.append(watching.SessionState(name, current or 0, frozen))
+        pressure = machine.pressure()
+        return machine.memory().available, pressure.some_avg10 if pressure else 0.0, states
+
+    def act_for_watcher(action: watching.Action) -> None:
+        {"freeze": sessions_api.freeze, "thaw": sessions_api.thaw, "stop": sessions_api.stop}[action.kind](action.name)
+
+    @asynccontextmanager
+    async def lifespan(app):
+        # The watcher runs in a background thread for as long as the server runs.
+        stop = threading.Event()
+        if run_watcher:
+            threading.Thread(
+                target=watching.run_forever, args=(watcher, read_for_watcher, act_for_watcher, stop), daemon=True
+            ).start()
+        yield
+        stop.set()
+
+    app = FastAPI(title="ollagi", docs_url=None, redoc_url=None, lifespan=lifespan)
+    app.state.watcher = watcher
+    # Kept on the app so tests can drive exactly what the background thread runs.
+    app.state.watcher_read = read_for_watcher
+    app.state.watcher_act = act_for_watcher
 
     @app.middleware("http")
     async def check_access(request: Request, call_next):
@@ -70,6 +106,28 @@ def create_app(config: Config, machine=None, sessions_api=sessions) -> FastAPI:
     @app.get("/")
     def page():
         return FileResponse(STATIC / "index.html")
+
+    @app.get("/qr.svg")
+    def qr_code():
+        if not phone_url:
+            raise HTTPException(404, "no phone address: Tailscale is not running")
+        svg = subprocess.run(["qrencode", "-t", "SVG", "-m", "2", "-o", "-", phone_url], capture_output=True, timeout=10)
+        if svg.returncode != 0:
+            raise HTTPException(500, "qrencode failed")
+        return Response(svg.stdout, media_type="image/svg+xml")
+
+    @app.get("/api/watcher")
+    def watcher_state():
+        s = watcher.settings
+        return {
+            "level": watcher.level,
+            "action": s.action,
+            "frozen_by_watcher": list(watcher.frozen_by_me),
+            "thresholds": {"amber_free": s.amber_free, "red_free": s.red_free,
+                           "amber_pressure": s.amber_pressure, "red_pressure": s.red_pressure},
+            "events": [{"time": e.time, "text": e.text} for e in list(watcher.events)[-20:]],
+            "phone_url": phone_url,
+        }
 
     @app.get("/api/whoami")
     def whoami(request: Request):
@@ -112,6 +170,7 @@ def create_app(config: Config, machine=None, sessions_api=sessions) -> FastAPI:
     @app.get("/api/sessions/{name}/screen")
     def screen(name: str, lines: int = 200):
         _require_session(sessions_api, name)
+        _refuse_if_frozen(sessions_api, name)
         return {"name": name, "text": sessions_api.screen(name, lines=min(max(lines, 10), 2000))}
 
     @app.post("/api/sessions")
@@ -132,6 +191,7 @@ def create_app(config: Config, machine=None, sessions_api=sessions) -> FastAPI:
     @app.post("/api/sessions/{name}/send")
     def send(name: str, body: SendRequest):
         _require_session(sessions_api, name)
+        _refuse_if_frozen(sessions_api, name)
         try:
             if body.key:
                 sessions_api.send_key(name, body.key)
@@ -149,7 +209,24 @@ def create_app(config: Config, machine=None, sessions_api=sessions) -> FastAPI:
         sessions_api.stop(name)
         return {"stopped": name}
 
+    @app.post("/api/sessions/{name}/freeze")
+    def freeze(name: str):
+        _require_session(sessions_api, name)
+        sessions_api.freeze(name)
+        return {"frozen": name}
+
+    @app.post("/api/sessions/{name}/thaw")
+    def thaw(name: str):
+        _require_session(sessions_api, name)
+        sessions_api.thaw(name)
+        return {"thawed": name}
+
     return app
+
+
+def _refuse_if_frozen(sessions_api, name: str) -> None:
+    if sessions_api.scope_state(name)[0]:
+        raise HTTPException(409, f"{name} is frozen; resume it to see or type into it")
 
 
 def _require_session(sessions_api, name: str) -> None:
@@ -162,8 +239,8 @@ def _require_session(sessions_api, name: str) -> None:
 
 
 def _is_managed(machine, pid: int) -> bool:
-    """True when the process runs inside one of ollagi's own systemd scopes."""
+    """True when the process runs inside one of ollagi's session slices."""
     try:
-        return f"/{sessions.PREFIX}" in machine.cgroup_of(pid)
+        return "/app-ollagi.slice/" in machine.cgroup_of(pid)
     except OSError:
         return False

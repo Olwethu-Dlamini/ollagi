@@ -17,6 +17,7 @@ class FakeSessions:
 
     def __init__(self):
         self.running = {"demo": "/work/demo"}
+        self.frozen = set()
         self.sent = []
 
     def names(self):
@@ -44,6 +45,15 @@ class FakeSessions:
     def stop(self, name):
         del self.running[name]
 
+    def scope_state(self, name):
+        return name in self.frozen, 300 * MIB, 500 * MIB
+
+    def freeze(self, name):
+        self.frozen.add(name)
+
+    def thaw(self, name):
+        self.frozen.discard(name)
+
 
 def machine(available_gib=8.0):
     return SimpleNamespace(
@@ -56,7 +66,7 @@ def machine(available_gib=8.0):
             Proc(pid=200, ppid=1, name="claude", rss=380 * MIB),
             Proc(pid=300, ppid=1, name="brave", rss=600 * MIB),
         ],
-        cgroup_of=lambda pid: "0::/user.slice/app.slice/ollagi-demo.scope\n" if pid == 200 else "0::/app.slice\n",
+        cgroup_of=lambda pid: "0::/user.slice/app.slice/app-ollagi.slice/app-ollagi-demo.slice/tmux-spawn-1.scope\n" if pid == 200 else "0::/app.slice\n",
     )
 
 
@@ -137,3 +147,48 @@ def test_whoami_names_the_tailscale_login_or_this_machine(fake_sessions):
     c = client(fake_sessions)
     assert c.get("/api/whoami").json() == {"login": "this machine"}
     assert c.get("/api/whoami", headers={"Tailscale-User-Login": "me@example.com"}).json() == {"login": "me@example.com"}
+
+
+def test_a_frozen_session_refuses_screen_and_typing_until_thawed(fake_sessions):
+    c = client(fake_sessions)
+    assert c.post("/api/sessions/demo/freeze", headers=CHANGE).status_code == 200
+    assert c.get("/api/sessions/demo/screen").status_code == 409
+    assert c.post("/api/sessions/demo/send", json={"text": "hi"}, headers=CHANGE).status_code == 409
+    assert c.post("/api/sessions/demo/thaw", headers=CHANGE).status_code == 200
+    assert c.get("/api/sessions/demo/screen").status_code == 200
+
+
+def test_watcher_state_is_reported(fake_sessions):
+    data = client(fake_sessions).get("/api/watcher").json()
+    assert data["level"] == "green"
+    assert data["action"] == "freeze"
+    assert data["events"] == []
+
+
+def test_the_watcher_reads_scopes_and_freezes_through_the_sessions_module(fake_sessions):
+    """Runs the server's own watcher read and act functions, as the background thread does."""
+    from ollagi.web import create_app
+
+    app = create_app(Config(), machine=machine(available_gib=0.5), sessions_api=fake_sessions)
+    w, read, act = app.state.watcher, app.state.watcher_read, app.state.watcher_act
+    available, pressure, states = read()
+    assert [(x.name, x.frozen) for x in states] == [("demo", False)]
+    w.step(0, available, pressure, states)  # red begins
+    for action in w.step(10, available, pressure, read()[2]):  # red for 10 s: act
+        act(action)
+    assert "demo" in fake_sessions.frozen
+    assert read()[2][0].frozen
+
+
+def test_qr_code_is_an_svg_of_the_phone_address(fake_sessions):
+    import shutil
+
+    from ollagi.web import create_app
+
+    if not shutil.which("qrencode"):
+        pytest.skip("qrencode not installed")
+    app = create_app(Config(), machine=machine(), sessions_api=fake_sessions, phone_url="http://box.tail1.ts.net")
+    response = TestClient(app, base_url="http://127.0.0.1:8765").get("/qr.svg")
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/svg+xml"
+    assert response.text.lstrip().startswith("<?xml") or "<svg" in response.text

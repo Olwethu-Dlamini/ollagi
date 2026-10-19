@@ -1,5 +1,7 @@
 # 0005: Each session is its own tmux server inside its own systemd scope
 
+> Superseded in part by 0009: the scope turned out to hold only the tmux server, so sessions are now slices.
+
 Date: 2026-10-19
 
 ## Context

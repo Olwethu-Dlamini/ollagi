@@ -58,12 +58,20 @@
   #viewer .controls { padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); }
   .send { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
   #error { color: var(--bad); white-space: pre-wrap; }
+  .events { margin: 6px 0 0; padding-left: 18px; font-size: 13px; color: var(--muted); }
+  #phone { position: fixed; inset: 0; z-index: 6; display: none; align-items: center; justify-content: center;
+           background: rgba(0,0,0,.6); }
+  #phone.open { display: flex; }
+  #phone div { background: #fff; color: #111; border-radius: 14px; padding: 18px; text-align: center; max-width: 320px; }
+  #phone img { width: 240px; height: 240px; image-rendering: pixelated; }
+  .frozen-note { padding: 14px; background: var(--card); border-bottom: 1px solid var(--line); }
 </style>
 </head>
 <body>
 <header>
   <h1>ollagi</h1>
   <span id="status">loading…</span>
+  <button id="phone-open">Phone</button>
 </header>
 
 <main>
@@ -75,6 +83,13 @@
     <div class="row"><span>CPU load (1 min)</span><span id="load"></span></div>
     <div class="row"><span>Swap used</span><span id="swap"></span></div>
     <p id="verdict" class="muted"></p>
+  </section>
+
+  <section>
+    <h2>RAM watcher</h2>
+    <div class="row"><span>Level</span><span id="watch-level"></span></div>
+    <div class="row"><span>At red</span><span id="watch-action"></span></div>
+    <ul class="events" id="watch-events"></ul>
   </section>
 
   <section>
@@ -110,8 +125,13 @@
   <header>
     <button id="close">‹ Back</button>
     <h1 id="viewer-title"></h1>
-    <button id="stop" class="danger" style="margin-left:auto">Stop</button>
+    <button id="pause" style="margin-left:auto">Pause</button>
+    <button id="stop" class="danger">Stop</button>
   </header>
+  <div id="frozen-note" class="frozen-note" hidden>
+    This session is frozen: every process in it is paused and nothing is lost.
+    <button id="resume" class="primary">Resume</button>
+  </div>
   <pre id="screen"></pre>
   <div class="controls">
     <form id="send-form" class="send">
@@ -119,6 +139,15 @@
       <button class="primary" type="submit">Send</button>
     </form>
     <div class="keys" id="keys"></div>
+  </div>
+</div>
+
+<div id="phone">
+  <div>
+    <img id="qr" alt="QR code of the phone address">
+    <p id="phone-url"></p>
+    <p style="font-size:13px">Scan with the phone camera. The phone needs the Tailscale app, signed in to the same account.</p>
+    <button id="phone-close">Close</button>
   </div>
 </div>
 
@@ -151,7 +180,7 @@ async function api(path, body) {
   return data;
 }
 
-// The same levels the RAM watcher will act on (README, step 5).
+// The same default levels the RAM watcher acts on (src/ollagi/watcher.py); the watcher card shows its real level.
 function pressureLevel(avg10, available) {
   if (avg10 > 30 || available < 0.75 * GiB) return ["red", "bad"];
   if (avg10 > 10 || available < 1.5 * GiB) return ["amber", "warn"];
@@ -199,6 +228,28 @@ async function refreshSystem() {
   }
 }
 
+// ---- RAM watcher ------------------------------------------------------------------------------
+const LEVEL_CLASS = { green: "good", amber: "warn", red: "bad" };
+let phoneUrl = null;
+
+async function refreshWatcher() {
+  const w = await api("/api/watcher");
+  phoneUrl = w.phone_url;
+  $("watch-level").replaceChildren(el("span", w.level, "pill " + LEVEL_CLASS[w.level]));
+  $("watch-action").textContent = w.action + " the heaviest session" + (w.frozen_by_watcher.length ? ` (frozen now: ${w.frozen_by_watcher.join(", ")})` : "");
+  const events = w.events.slice(-5).reverse();
+  $("watch-events").replaceChildren(...(events.length ? events : [{ time: null, text: "no events yet" }]).map((e) =>
+    el("li", (e.time ? new Date(e.time * 1000).toLocaleTimeString() + "  " : "") + e.text)));
+}
+
+$("phone-open").onclick = () => {
+  if (!phoneUrl) { alert("Tailscale is not running, so there is no phone address."); return; }
+  $("qr").src = "/qr.svg";
+  $("phone-url").textContent = phoneUrl;
+  $("phone").classList.add("open");
+};
+$("phone-close").onclick = () => $("phone").classList.remove("open");
+
 // ---- sessions --------------------------------------------------------------------------------
 async function refreshSessions() {
   const list = await api("/api/sessions");
@@ -209,7 +260,7 @@ async function refreshSessions() {
     const minutes = Math.round(s.age_seconds / 60);
     button.append(
       el("strong", s.name), el("br"),
-      el("span", `${s.alive ? "running" : "program exited"} · ${mib(s.memory_current)} (peak ${mib(s.memory_peak)}) · ${minutes} min`, "muted"), el("br"),
+      el("span", `${s.frozen ? "frozen" : s.alive ? "running" : "program exited"} · ${mib(s.memory_current)} (peak ${mib(s.memory_peak)}) · ${minutes} min`, "muted"), el("br"),
       el("span", s.directory, "muted"),
     );
     button.onclick = () => openViewer(s.name);
@@ -245,9 +296,14 @@ async function refreshScreen() {
   const atBottom = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 30;
   try {
     const data = await api(`/api/sessions/${current}/screen?lines=300`);
+    $("frozen-note").hidden = true;
     pre.textContent = data.text;
     if (atBottom) pre.scrollTop = pre.scrollHeight;  // follow new output unless you scrolled up to read
-  } catch (error) { pre.textContent = error.message; }
+  } catch (error) {
+    // A frozen session cannot show its screen (its tmux is paused too); keep the last text.
+    if (error.message.includes("frozen")) $("frozen-note").hidden = false;
+    else pre.textContent = error.message;
+  }
 }
 
 function openViewer(name) {
@@ -270,6 +326,9 @@ $("send-form").onsubmit = async (event) => {
   setTimeout(refreshScreen, 300);
 };
 
+$("pause").onclick = async () => { await api(`/api/sessions/${current}/freeze`, {}); refreshScreen(); };
+$("resume").onclick = async () => { await api(`/api/sessions/${current}/thaw`, {}); setTimeout(refreshScreen, 300); };
+
 $("stop").onclick = async () => {
   if (!confirm(`Stop ${current}? The Claude session ends; work saved to disk stays.`)) return;
   await api(`/api/sessions/${current}/stop`, {});
@@ -280,7 +339,7 @@ $("stop").onclick = async () => {
 let whoami = null;
 async function tick() {
   try {
-    await Promise.all([refreshSystem(), refreshSessions()]);
+    await Promise.all([refreshSystem(), refreshSessions(), refreshWatcher()]);
     if (!whoami) whoami = (await api("/api/whoami")).login;
     $("status").textContent = `${whoami} · updated ${new Date().toLocaleTimeString()}`;
   } catch (error) { $("status").textContent = "offline: " + error.message; }

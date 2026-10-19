@@ -28,15 +28,22 @@ def test_names_must_be_short_lowercase_and_safe():
             sessions.check_name(bad)
 
 
-def test_start_runs_tmux_inside_its_own_systemd_scope():
+def test_start_runs_tmux_in_a_scope_inside_the_sessions_own_slice():
     argv = sessions.start_command("sd-6641", "/work/repo", ["claude"])
     assert argv[:4] == ["systemd-run", "--user", "--scope", "--quiet"]
-    assert "--unit=ollagi-sd-6641" in argv
-    assert "ManagedOOMMemoryPressure=kill" in argv
+    assert "--unit=ollagi-sd\\x2d6641" in argv
+    assert "--slice=app-ollagi-sd\\x2d6641.slice" in argv
     tmux_part = argv[argv.index("tmux"):]
     assert tmux_part[:3] == ["tmux", "-L", "ollagi-sd-6641"]
     assert tmux_part[-2:] == ["--", "claude"]
     assert ["-c", "/work/repo"] == tmux_part[tmux_part.index("-c"):tmux_part.index("-c") + 2]
+
+
+def test_dashes_are_escaped_so_one_sessions_slice_never_nests_inside_another():
+    # Unescaped, "sd-6641" would become app-ollagi-sd-6641.slice, which systemd places inside
+    # app-ollagi-sd.slice: freezing a session called "sd" would freeze this one too.
+    assert sessions.slice_unit("sd-6641") == "app-ollagi-sd\\x2d6641.slice"
+    assert sessions.slice_unit("sd") == "app-ollagi-sd.slice"
 
 
 def test_text_is_sent_literally_then_enter_is_pressed():
@@ -91,7 +98,9 @@ needs_tmux = pytest.mark.skipif(
 def test_a_real_session_starts_shows_output_takes_input_and_stops(tmp_path):
     """Uses a harmless shell instead of claude, so the test costs no tokens."""
     name = f"test-{os.getpid()}"
-    script = "echo ready; read line; echo got:$line; exec sleep 60"
+    # Python holds 30 MiB (written, so the memory is really used), then the shell talks.
+    hold = "python3 -c 'import time; x = bytes([1]) * (30 << 20); time.sleep(120)' &"
+    script = f"{hold} echo ready; read line; echo got:$line; exec sleep 60"
     sessions.start(name, str(tmp_path), ["sh", "-c", script])
     try:
         assert name in sessions.names()
@@ -101,7 +110,9 @@ def test_a_real_session_starts_shows_output_takes_input_and_stops(tmp_path):
         details = sessions.info(name)
         assert details.directory == str(tmp_path)
         assert details.alive
-        assert details.memory_current is not None and details.memory_current > 0
+        # The program tmux started must be counted, not just the tmux server: tmux moves it into a
+        # scope of its own, and only the session's slice holds both.
+        _wait_for(lambda: (sessions.info(name).memory_current or 0) >= 30 << 20)
         # Frozen: listing and info must answer without asking the (paused) tmux server.
         sessions.freeze(name)
         _wait_for(lambda: sessions.scope_state(name)[0])
