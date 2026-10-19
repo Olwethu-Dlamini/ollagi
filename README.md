@@ -20,8 +20,8 @@ Early. Built in small steps, one idea per commit, so every part can be read and 
 | 1 | Skeleton, decisions folder | done |
 | 2 | `ollagi doctor`: is it safe to start another session? | done |
 | 3 | Sessions in tmux: start, list, show, send, stop | done |
-| 4 | Web interface: sessions and system, usable on a phone | in progress |
-| 4b | Tailscale: `tailscale serve`, `ollagi qr` | planned |
+| 4 | Web interface: sessions and system, usable on a phone | done |
+| 4b | Tailscale: `tailscale serve`, `ollagi qr`, user service | done |
 | 5 | RAM watcher (memory pressure) and overnight queue | planned |
 | 6 | Ticket batching from Jira | planned |
 | 7 | Projects from a config file | planned |
@@ -32,6 +32,16 @@ Early. Built in small steps, one idea per commit, so every part can be read and 
 uv sync               # create .venv with the pinned versions
 uv run ollagi doctor  # is there room for another Claude session?
 uv run pytest         # run the tests
+uv run ollagi serve   # the web page on http://127.0.0.1:8765 (or run it as a service, below)
+uv run ollagi qr      # the phone address as a QR code
+```
+
+Phone access, once (decision 0007):
+
+```bash
+systemctl --user enable --now "$PWD/deploy/ollagi.service"   # page starts at login
+sudo tailscale set --operator=$USER                            # lets tailscale serve run without sudo
+tailscale serve --bg --http=80 http://127.0.0.1:8765           # page on http://<machine>.<tailnet>.ts.net
 ```
 
 `ollagi doctor` on this laptop, 2026-10-19 12:15 (two sessions already open):
