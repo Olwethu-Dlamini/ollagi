@@ -17,12 +17,33 @@ Early. Built in small steps, one idea per commit, so every part can be read and 
 | Step | What | State |
 |------|------|-------|
 | 1 | Skeleton, decisions folder | done |
-| 2 | `ollagi doctor`: is it safe to start another session? | planned |
+| 2 | `ollagi doctor`: is it safe to start another session? | done |
 | 3 | Sessions in tmux: start, list, stop | planned |
 | 4 | Phone page over `tailscale serve`, `ollagi qr` | planned |
 | 5 | Overnight queue, one task at a time | planned |
 | 6 | Ticket batching from Jira | planned |
 | 7 | Projects from a config file | planned |
+
+## Try it
+
+```bash
+uv sync               # create .venv with the pinned versions
+uv run ollagi doctor  # is there room for another Claude session?
+uv run pytest         # run the tests
+```
+
+`ollagi doctor` on this laptop, 2026-10-19 (two sessions already open):
+
+```
+memory    4.3 GiB available of 11.4 GiB
+swap      1.8 GiB used of 22.8 GiB (not counted as available)
+cpu load  2.51 (1 min), 2.56 (5 min) on 8 threads
+sessions  2 running
+          pid 273043: 341 MiB across 3 processes
+          pid 275800: 422 MiB across 4 processes
+start another? no: 0 more can start
+          2 sessions running, the limit is 2
+```
 
 ## How to read this repo
 
