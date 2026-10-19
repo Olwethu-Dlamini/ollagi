@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#111418">
+<title>ollagi</title>
+<!-- An inline icon, so the browser does not ask the server for /favicon.ico. -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='7' fill='%236d9eff'/%3E%3C/svg%3E">
+<style>
+  /* Colours live in variables, so light and dark mode only swap the values. */
+  :root {
+    --bg: #f4f5f7; --card: #ffffff; --text: #16191d; --muted: #5d6670; --line: #dfe3e8;
+    --accent: #2f6fde; --good: #1f8a4c; --warn: #b7791f; --bad: #c53030; --screen: #0f1216; --screen-text: #d7dde4;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111418; --card: #1a1e24; --text: #e7eaee; --muted: #9aa4af; --line: #2a3038;
+      --accent: #6d9eff; --good: #3fbf74; --warn: #e0a43a; --bad: #f06a6a; --screen: #0b0d10; --screen-text: #d7dde4;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 10px;
+           padding: 12px 16px; background: var(--bg); border-bottom: 1px solid var(--line); }
+  header h1 { margin: 0; font-size: 18px; letter-spacing: .3px; }
+  #status { margin-left: auto; font-size: 13px; color: var(--muted); }
+  main { max-width: 960px; margin: 0 auto; padding: 12px 16px 40px; display: grid; gap: 12px; }
+  @media (min-width: 820px) { main { grid-template-columns: 1fr 1fr; } .wide { grid-column: 1 / -1; } }
+  section { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px; }
+  h2 { margin: 0 0 10px; font-size: 13px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); }
+  .row { display: flex; justify-content: space-between; gap: 8px; padding: 4px 0; }
+  .muted { color: var(--muted); }
+  .bar { height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; margin: 6px 0 10px; }
+  .bar > span { display: block; height: 100%; background: var(--accent); }
+  .pill { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; color: #fff; }
+  .good { background: var(--good); } .warn { background: var(--warn); } .bad { background: var(--bad); }
+  .session { display: block; width: 100%; text-align: left; padding: 10px; margin: 6px 0; border-radius: 10px;
+             border: 1px solid var(--line); background: transparent; color: inherit; font: inherit; cursor: pointer; }
+  .session strong { font-size: 16px; }
+  form, .controls { display: grid; gap: 8px; }
+  input, select, button, textarea { font: inherit; }
+  input, select, textarea { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid var(--line);
+                            background: var(--bg); color: var(--text); }
+  button { padding: 10px 14px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--text); cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  button.danger { color: var(--bad); border-color: var(--bad); }
+  .keys { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 6px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  td { padding: 4px 0; border-bottom: 1px solid var(--line); }
+  td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+  #viewer { position: fixed; inset: 0; z-index: 5; display: none; flex-direction: column; background: var(--bg); }
+  #viewer.open { display: flex; }
+  #viewer header { position: static; }
+  #screen { flex: 1; margin: 0; padding: 10px; overflow: auto; background: var(--screen); color: var(--screen-text);
+            font: 12px/1.35 ui-monospace, "JetBrains Mono", Menlo, monospace; white-space: pre-wrap; word-break: break-word; }
+  #viewer .controls { padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); }
+  .send { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
+  #error { color: var(--bad); white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<header>
+  <h1>ollagi</h1>
+  <span id="status">loading…</span>
+</header>
+
+<main>
+  <section id="machine">
+    <h2>Machine</h2>
+    <div class="row"><span>Memory available</span><span id="mem-text"></span></div>
+    <div class="bar"><span id="mem-bar"></span></div>
+    <div class="row"><span>Memory pressure</span><span id="pressure"></span></div>
+    <div class="row"><span>CPU load (1 min)</span><span id="load"></span></div>
+    <div class="row"><span>Swap used</span><span id="swap"></span></div>
+    <p id="verdict" class="muted"></p>
+  </section>
+
+  <section>
+    <h2>Claude sessions</h2>
+    <div id="sessions"></div>
+    <p id="others" class="muted"></p>
+  </section>
+
+  <section>
+    <h2>Start a session</h2>
+    <form id="start-form">
+      <input id="start-name" placeholder="name, e.g. sd-6641" required pattern="[a-z0-9][a-z0-9-]{0,31}" autocapitalize="off">
+      <select id="start-project"></select>
+      <input id="start-dir" placeholder="or a folder path" autocapitalize="off">
+      <label class="muted"><input id="start-force" type="checkbox" style="width:auto"> start even if memory is short</label>
+      <button class="primary" type="submit">Start Claude</button>
+      <div id="error"></div>
+    </form>
+  </section>
+
+  <section>
+    <h2>Disks</h2>
+    <table id="disks"></table>
+  </section>
+
+  <section class="wide">
+    <h2>Heaviest processes</h2>
+    <table id="processes"></table>
+  </section>
+</main>
+
+<div id="viewer">
+  <header>
+    <button id="close">‹ Back</button>
+    <h1 id="viewer-title"></h1>
+    <button id="stop" class="danger" style="margin-left:auto">Stop</button>
+  </header>
+  <pre id="screen"></pre>
+  <div class="controls">
+    <form id="send-form" class="send">
+      <input id="send-text" placeholder="Type to Claude…" autocapitalize="sentences">
+      <button class="primary" type="submit">Send</button>
+    </form>
+    <div class="keys" id="keys"></div>
+  </div>
+</div>
+
+<script>
+// ---- small helpers -------------------------------------------------------------------------
+const $ = (id) => document.getElementById(id);
+const GiB = 1024 ** 3, MiB = 1024 ** 2;
+const gib = (n) => (n / GiB).toFixed(1) + " GiB";
+const mib = (n) => n == null ? "?" : Math.round(n / MiB) + " MiB";
+
+// Build an element. Text is always set with textContent, never innerHTML, so whatever a session
+// prints (it could contain "<script>") is shown as text and can never run as code in this page.
+function el(tag, text, className) {
+  const node = document.createElement(tag);
+  if (text != null) node.textContent = text;
+  if (className) node.className = className;
+  return node;
+}
+
+async function api(path, body) {
+  const options = body === undefined ? {} : {
+    method: "POST",
+    // X-Ollagi tells the server this change comes from this page (see src/ollagi/access.py).
+    headers: { "Content-Type": "application/json", "X-Ollagi": "1" },
+    body: JSON.stringify(body),
+  };
+  const response = await fetch(path, options);
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.detail || data.error || response.statusText);
+  return data;
+}
+
+// The same levels the RAM watcher will act on (README, step 5).
+function pressureLevel(avg10, available) {
+  if (avg10 > 30 || available < 0.75 * GiB) return ["red", "bad"];
+  if (avg10 > 10 || available < 1.5 * GiB) return ["amber", "warn"];
+  return ["green", "good"];
+}
+
+// ---- machine, disks, processes -------------------------------------------------------------
+async function refreshSystem() {
+  const s = await api("/api/system");
+  const used = 1 - s.memory.available / s.memory.total;
+  $("mem-text").textContent = `${gib(s.memory.available)} of ${gib(s.memory.total)}`;
+  $("mem-bar").style.width = (used * 100).toFixed(0) + "%";
+  const avg10 = s.pressure ? s.pressure.some_avg10 : 0;
+  const [word, cls] = pressureLevel(avg10, s.memory.available);
+  $("pressure").replaceChildren(el("span", `${word} · ${avg10.toFixed(1)}%`, "pill " + cls));
+  $("load").textContent = `${s.load.one_minute.toFixed(2)} on ${s.load.cpus} threads`;
+  $("swap").textContent = `${gib(s.swap.used)} of ${gib(s.swap.total)}`;
+  $("verdict").textContent = (s.can_start ? `Room for ${s.can_start} more session(s). ` : "No room for another session. ") + s.reason;
+
+  const others = s.claude_sessions.filter((c) => !c.managed);
+  $("others").textContent = others.length
+    ? `Also running outside ollagi: ${others.map((c) => `pid ${c.pid} (${mib(c.tree_rss)})`).join(", ")}`
+    : "";
+
+  $("disks").replaceChildren(...s.disks.map((d) => {
+    const row = el("tr");
+    row.append(el("td", d.mount), el("td", `${gib(d.free)} free of ${gib(d.total)}`));
+    return row;
+  }));
+  $("processes").replaceChildren(...s.top_processes.map((p) => {
+    const row = el("tr");
+    row.append(el("td", `${p.name}`), el("td", `pid ${p.pid}`, "muted"), el("td", mib(p.rss)));
+    return row;
+  }));
+
+  const select = $("start-project");
+  if (!select.dataset.filled) {
+    select.append(el("option", "choose a project…"));
+    for (const p of s.projects) {
+      const option = el("option", `${p.name}  (${p.directory})`);
+      option.value = p.directory;
+      select.append(option);
+    }
+    select.dataset.filled = "1";
+  }
+}
+
+// ---- sessions --------------------------------------------------------------------------------
+async function refreshSessions() {
+  const list = await api("/api/sessions");
+  const box = $("sessions");
+  if (!list.length) { box.replaceChildren(el("p", "No ollagi sessions running.", "muted")); return; }
+  box.replaceChildren(...list.map((s) => {
+    const button = el("button", null, "session");
+    const minutes = Math.round(s.age_seconds / 60);
+    button.append(
+      el("strong", s.name), el("br"),
+      el("span", `${s.alive ? "running" : "program exited"} · ${mib(s.memory_current)} (peak ${mib(s.memory_peak)}) · ${minutes} min`, "muted"), el("br"),
+      el("span", s.directory, "muted"),
+    );
+    button.onclick = () => openViewer(s.name);
+    return button;
+  }));
+}
+
+$("start-form").onsubmit = async (event) => {
+  event.preventDefault();
+  $("error").textContent = "";
+  const directory = $("start-dir").value.trim() || $("start-project").value;
+  try {
+    await api("/api/sessions", { name: $("start-name").value.trim(), directory, force: $("start-force").checked });
+    $("start-name").value = "";
+    await refreshSessions();
+  } catch (error) { $("error").textContent = error.message; }
+};
+
+// ---- one session, full screen -----------------------------------------------------------------
+let current = null, screenTimer = null;
+const KEYS = [["Enter", "Enter"], ["Esc", "Escape"], ["^C", "C-c"], ["↑", "Up"], ["↓", "Down"],
+              ["Tab", "Tab"], ["⇧Tab", "BTab"], ["1", "1"], ["2", "2"], ["3", "3"], ["y", "y"], ["n", "n"]];
+
+$("keys").replaceChildren(...KEYS.map(([label, key]) => {
+  const button = el("button", label);
+  button.onclick = () => api(`/api/sessions/${current}/send`, { key }).then(refreshScreen);
+  return button;
+}));
+
+async function refreshScreen() {
+  if (!current) return;
+  const pre = $("screen");
+  const atBottom = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 30;
+  try {
+    const data = await api(`/api/sessions/${current}/screen?lines=300`);
+    pre.textContent = data.text;
+    if (atBottom) pre.scrollTop = pre.scrollHeight;  // follow new output unless you scrolled up to read
+  } catch (error) { pre.textContent = error.message; }
+}
+
+function openViewer(name) {
+  current = name;
+  $("viewer-title").textContent = name;
+  $("viewer").classList.add("open");
+  $("screen").textContent = "";
+  refreshScreen();
+  screenTimer = setInterval(refreshScreen, 1500);
+}
+
+$("close").onclick = () => { clearInterval(screenTimer); current = null; $("viewer").classList.remove("open"); refreshSessions(); };
+
+$("send-form").onsubmit = async (event) => {
+  event.preventDefault();
+  const text = $("send-text").value;
+  if (!text) return;
+  await api(`/api/sessions/${current}/send`, { text });
+  $("send-text").value = "";
+  setTimeout(refreshScreen, 300);
+};
+
+$("stop").onclick = async () => {
+  if (!confirm(`Stop ${current}? The Claude session ends; work saved to disk stays.`)) return;
+  await api(`/api/sessions/${current}/stop`, {});
+  $("close").onclick();
+};
+
+// ---- keep the page fresh ------------------------------------------------------------------------
+async function tick() {
+  try {
+    await Promise.all([refreshSystem(), refreshSessions()]);
+    $("status").textContent = "updated " + new Date().toLocaleTimeString();
+  } catch (error) { $("status").textContent = "offline: " + error.message; }
+}
+tick();
+setInterval(tick, 5000);
+</script>
+</body>
+</html>
