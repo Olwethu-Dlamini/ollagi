@@ -61,3 +61,19 @@ Code that runs outside programs (tmux, systemctl) takes the "run a command" func
 parameter. Tests pass a fake that writes down the commands instead of running them, so they can
 check *which* commands would run. One test still starts a real session, with a harmless shell
 script instead of claude, to prove the real commands work together.
+
+## Tailscale, MagicDNS and `tailscale serve`
+
+- Tailscale joins my devices into a private network (a tailnet) over WireGuard, an encrypted tunnel.
+  Each device gets an address like 100.x.y.z and a MagicDNS name like `omarchy.tail653118.ts.net`
+  that only works inside the tailnet.
+- `tailscale serve` makes a local server reachable on the tailnet: it receives requests on the
+  device's tailnet address and forwards them to 127.0.0.1. It adds headers saying who sent the
+  request (`Tailscale-User-Login`), which is how the page knows it is me.
+- `tailscale funnel` would publish to the internet. ollagi never uses it.
+
+## A systemd user service
+
+A unit file (`deploy/ollagi.service`) tells systemd how to run a program: the command, what to do
+if it crashes (`Restart=on-failure`) and when to start it (`WantedBy=default.target`, at login).
+`systemctl --user` manages services that run as me, without root.
