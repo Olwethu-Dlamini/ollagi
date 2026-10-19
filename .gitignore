@@ -1,0 +1,20 @@
+# Python build and cache output
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# Virtual environments (created by uv, never committed)
+.venv/
+
+# Test and tool caches
+.pytest_cache/
+.ruff_cache/
+.coverage
+
+# Local runtime data and secrets: ollagi keeps these under ~/.local/share/ollagi, but guard anyway
+*.db
+*.log
+.env
+.env.*
