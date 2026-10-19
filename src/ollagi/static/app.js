@@ -51,7 +51,7 @@ function showView(name) {
   for (const b of document.querySelectorAll(".tabs button")) b.classList.toggle("on", b.dataset.view === name);
   for (const view of ["sessions", "queue", "system"]) $(`view-${view}`).hidden = name !== view;
   $("new-open").hidden = name !== "sessions";
-  if (name === "queue") refreshQueue();
+  if (name === "queue") { refreshQueue(); refreshDrafts(); }
 }
 for (const b of document.querySelectorAll(".tabs button")) b.onclick = () => showView(b.dataset.view);
 $("chip-memory").onclick = () => showView("system");
@@ -408,6 +408,50 @@ function groupCard(g) {
   card.append(actions);
   return card;
 }
+
+// ---- Slack outbox: drafts only; one Send per message, after seeing its exact text --------------
+async function refreshDrafts() {
+  const data = await api("/api/slack/drafts");
+  $("drafts").replaceChildren(...data.drafts.filter((d) => d.status !== "discarded").slice(0, 20).map(draftCard));
+}
+
+function draftCard(d) {
+  const card = el("div", null, "draft");
+  const where = d.thread_ts ? `${d.channel}, reply in thread ${d.thread_ts}` : d.channel;
+  card.append(el("div", `#${d.id} · ${where} · ${d.status}${d.source !== "me" ? " · from " + d.source : ""}`, "meta-line"),
+              el("pre", d.text));
+  if (d.status !== "draft") {
+    if (d.result) card.append(el("div", d.result, "meta-line"));
+    return card;
+  }
+  const actions = el("div", null, "actions");
+  const said = el("span", null, "muted");
+  actions.append(
+    button("Preview", async () => {
+      said.textContent = "asking slack.sh…";
+      try { said.textContent = (await api(`/api/slack/drafts/${d.id}/preview`, {})).notifies; }
+      catch (error) { said.textContent = error.message; }
+    }),
+    Object.assign(button("Send", async () => {
+      // The approval: the exact text, shown once more, and an explicit OK for this one message.
+      if (!confirm(`Post this to ${where}?\n\n${d.text}`)) return;
+      try { await api(`/api/slack/drafts/${d.id}/send`, { confirmed_text: d.text }); refreshDrafts(); }
+      catch (error) { said.textContent = error.message; }
+    }), { className: "send-draft" }),
+    button("Discard", async () => { await api(`/api/slack/drafts/${d.id}/discard`, {}); refreshDrafts(); }),
+    said,
+  );
+  card.append(actions);
+  return card;
+}
+
+$("draft-form").onsubmit = async (event) => {
+  event.preventDefault();
+  await api("/api/slack/drafts", { channel: $("draft-channel").value, thread_ts: $("draft-thread").value || null,
+                                   text: $("draft-text").value });
+  $("draft-text").value = "";
+  refreshDrafts();
+};
 
 // ---- system ----------------------------------------------------------------------------------
 const LEVEL_WORD = { green: "green", amber: "amber", red: "red" };

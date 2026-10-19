@@ -17,6 +17,10 @@
     GET  /api/queue/{id}/result         a finished task's final screen, as text
     GET  /api/jira/groups               my open Jira tickets, grouped (read only, cached 5 minutes)
     POST /api/jira/queue                queue chosen tickets as one task {"keys", "directory"}
+    GET  /api/slack/drafts              the Slack outbox
+    POST /api/slack/drafts              add a draft       {"channel", "text", "thread_ts"}
+    POST /api/slack/drafts/{id}/edit | /preview | /discard
+    POST /api/slack/drafts/{id}/send    send ONE draft    {"confirmed_text"}, which must equal its text
     GET  /qr.svg                        the phone address as a QR code
 
 `create_app` receives the machine readers and the sessions module as arguments. The real server
@@ -37,7 +41,7 @@ from pydantic import BaseModel
 
 from collections import deque
 
-from ollagi import access, claude_screen, grouping, queue as queueing, sessions, system, watcher as watching
+from ollagi import access, claude_screen, grouping, queue as queueing, sessions, slack_outbox, system, watcher as watching
 from ollagi.budget import Limits, how_many_can_start
 from ollagi.config import Config
 from ollagi.processes import find_sessions, read_processes
@@ -79,11 +83,30 @@ class TicketsRequest(BaseModel):
 JIRA_CACHE_SECONDS = 300
 
 
+class DraftRequest(BaseModel):
+    channel: str
+    text: str
+    thread_ts: str | None = None
+
+
+class EditRequest(BaseModel):
+    text: str
+
+
+class SendDraftRequest(BaseModel):
+    confirmed_text: str
+
+# Queue events worth a Slack draft, when [slack] drafts_to is set (never sent without me).
+DRAFT_WORTHY = (" done", "waiting for you", "usage limit", "failed")
+
+
 def create_app(config: Config, machine=None, sessions_api=sessions, run_watcher=False, phone_url=None,
-               queue_store=None, run_queue=False, command_for=None, results_dir=None, jira_client=None) -> FastAPI:
+               queue_store=None, run_queue=False, command_for=None, results_dir=None, jira_client=None,
+               outbox=None) -> FastAPI:
     machine = machine or real_machine()
     watcher = watching.Watcher(config.watcher)
     store = queue_store or queueing.Store()
+    drafts = outbox or slack_outbox.Outbox()
     queue_events: deque = deque(maxlen=50)
 
     def room_for_a_task() -> bool:
@@ -93,6 +116,11 @@ def create_app(config: Config, machine=None, sessions_api=sessions, run_watcher=
         result = how_many_can_start(machine.memory(), machine.load(),
                                     [s.tree_rss for s in find_sessions(machine.processes())], Limits())
         return result.can_start > 0
+
+    def note_queue_event(text: str) -> None:
+        queue_events.append({"time": time.time(), "text": text})
+        if config.slack_drafts_to and any(word in text for word in DRAFT_WORTHY):
+            drafts.add(config.slack_drafts_to, f"ollagi: {text}", source="queue")
 
     runner = queueing.Runner(store, sessions_api, room=room_for_a_task,
                              **({"command_for": command_for} if command_for else {}),
@@ -119,8 +147,7 @@ def create_app(config: Config, machine=None, sessions_api=sessions, run_watcher=
                 target=watching.run_forever, args=(watcher, read_for_watcher, act_for_watcher, stop), daemon=True
             ).start()
         if run_queue:
-            note = lambda text: queue_events.append({"time": time.time(), "text": text})  # noqa: E731
-            threading.Thread(target=queueing.run_forever, args=(runner, note, stop), daemon=True).start()
+            threading.Thread(target=queueing.run_forever, args=(runner, note_queue_event, stop), daemon=True).start()
         yield
         stop.set()
 
@@ -130,6 +157,7 @@ def create_app(config: Config, machine=None, sessions_api=sessions, run_watcher=
     app.state.watcher_read = read_for_watcher
     app.state.watcher_act = act_for_watcher
     app.state.queue_runner = runner
+    app.state.note_queue_event = note_queue_event
 
     @app.middleware("http")
     async def check_access(request: Request, call_next):
@@ -362,6 +390,43 @@ def create_app(config: Config, machine=None, sessions_api=sessions, run_watcher=
             return asdict(store.add(body.directory, grouping.prompt_for(chosen)))
         except ValueError as error:
             raise HTTPException(400, str(error)) from error
+
+    @app.get("/api/slack/drafts")
+    def list_drafts():
+        return {"drafts_to": config.slack_drafts_to, "drafts": [asdict(d) for d in drafts.all()]}
+
+    @app.post("/api/slack/drafts")
+    def add_draft(body: DraftRequest):
+        try:
+            return asdict(drafts.add(body.channel, body.text, body.thread_ts))
+        except ValueError as error:
+            raise HTTPException(400, str(error)) from error
+
+    def draft_action(draft_id: int, action):
+        try:
+            return action()
+        except KeyError as error:
+            raise HTTPException(404, f"no draft {draft_id}") from error
+        except ValueError as error:
+            raise HTTPException(409, str(error)) from error
+        except (RuntimeError, OSError, subprocess.TimeoutExpired) as error:
+            raise HTTPException(502, str(error)) from error
+
+    @app.post("/api/slack/drafts/{draft_id}/edit")
+    def edit_draft(draft_id: int, body: EditRequest):
+        return draft_action(draft_id, lambda: asdict(drafts.edit(draft_id, body.text)))
+
+    @app.post("/api/slack/drafts/{draft_id}/preview")
+    def preview_draft(draft_id: int):
+        return draft_action(draft_id, lambda: {"notifies": drafts.preview(draft_id)})
+
+    @app.post("/api/slack/drafts/{draft_id}/discard")
+    def discard_draft(draft_id: int):
+        return draft_action(draft_id, lambda: asdict(drafts.discard(draft_id)))
+
+    @app.post("/api/slack/drafts/{draft_id}/send")
+    def send_draft(draft_id: int, body: SendDraftRequest):
+        return draft_action(draft_id, lambda: asdict(drafts.send(draft_id, body.confirmed_text)))
 
     @app.post("/api/sessions/{name}/freeze")
     def freeze(name: str):

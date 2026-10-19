@@ -60,6 +60,18 @@
     <select id="jira-project" hidden></select>
     <div id="jira-groups"></div>
   </section>
+
+  <section class="card">
+    <h2>Slack outbox</h2>
+    <p class="muted">Nothing is posted until you press Send on a draft and confirm its exact text.</p>
+    <form id="draft-form" style="display:grid; gap:8px">
+      <input id="draft-channel" placeholder="#channel" autocapitalize="off" required>
+      <input id="draft-thread" placeholder="thread ts (optional, to reply in a thread)" autocapitalize="off">
+      <textarea id="draft-text" rows="3" placeholder="Message" required></textarea>
+      <button class="primary" type="submit">Save draft</button>
+    </form>
+    <div id="drafts"></div>
+  </section>
 </main>
 
 <!-- ===== System: the machine, the watcher, disks, processes ============================ -->

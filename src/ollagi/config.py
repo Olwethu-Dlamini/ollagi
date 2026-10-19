@@ -10,6 +10,9 @@ Everything has a default, so ollagi works with no file at all. Example file:
     name = "simedia"
     directory = "/run/media/oll/Linux/SIMEDIA/DATA!"
 
+    [slack]
+    drafts_to = "#my-notes"    # optional: queue events become DRAFTS here; nothing is sent without me
+
     [watcher]                  # the RAM watcher (docs/decisions/0008); every key is optional
     action = "freeze"          # "freeze", "stop" or "warn"
     red_free_gib = 0.75
@@ -45,6 +48,7 @@ class Config:
     allowed_hosts: tuple[str, ...] = ()
     projects: tuple[Project, ...] = field(default_factory=tuple)
     watcher: WatcherSettings = field(default_factory=WatcherSettings)
+    slack_drafts_to: str | None = None
 
 
 def parse(text: str) -> Config:
@@ -55,6 +59,7 @@ def parse(text: str) -> Config:
         allowed_hosts=tuple(data.get("allowed_hosts", ())),
         projects=tuple(Project(p["name"], p["directory"]) for p in data.get("projects", ())),
         watcher=parse_watcher(data.get("watcher", {})),
+        slack_drafts_to=data.get("slack", {}).get("drafts_to"),
     )
 
 

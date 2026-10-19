@@ -99,12 +99,26 @@ class FakeJira:
                 t("T-3", "Export the yearly report")]
 
 
-def client(fake_sessions, available_gib=8.0, jira=None, **config):
+def temp_outbox(helper=None):
+    """An outbox with a fake slack.sh: tests never reach Slack."""
+    from ollagi.slack_outbox import Outbox
+
+    def fake(argv, stdin):
+        import subprocess
+
+        if argv[1] == "preview":
+            return subprocess.CompletedProcess(argv, 0, "--- notifies: nobody\n", "")
+        return subprocess.CompletedProcess(argv, 0, "posted ts=1.0", "")
+
+    return Outbox(Path(tempfile.mkdtemp()) / "q.db", helper=Path("/fake/slack.sh"), run=helper or fake)
+
+
+def client(fake_sessions, available_gib=8.0, jira=None, outbox=None, **config):
     from ollagi.web import create_app
 
     cfg = Config(projects=(Project("simedia", "/work/DATA!"),), **config)
     app = create_app(cfg, machine=machine(available_gib), sessions_api=fake_sessions, queue_store=temp_store(),
-                     jira_client=jira or FakeJira())
+                     jira_client=jira or FakeJira(), outbox=outbox or temp_outbox())
     return TestClient(app, base_url="http://127.0.0.1:8765")
 
 
@@ -199,7 +213,8 @@ def test_the_watcher_reads_scopes_and_freezes_through_the_sessions_module(fake_s
     """Runs the server's own watcher read and act functions, as the background thread does."""
     from ollagi.web import create_app
 
-    app = create_app(Config(), machine=machine(available_gib=0.5), sessions_api=fake_sessions, queue_store=temp_store())
+    app = create_app(Config(), machine=machine(available_gib=0.5), sessions_api=fake_sessions, queue_store=temp_store(),
+                     outbox=temp_outbox())
     w, read, act = app.state.watcher, app.state.watcher_read, app.state.watcher_act
     available, pressure, states = read()
     assert [(x.name, x.frozen) for x in states] == [("demo", False)]
@@ -218,7 +233,7 @@ def test_qr_code_is_an_svg_of_the_phone_address(fake_sessions):
     if not shutil.which("qrencode"):
         pytest.skip("qrencode not installed")
     app = create_app(Config(), machine=machine(), sessions_api=fake_sessions, phone_url="http://box.tail1.ts.net",
-                     queue_store=temp_store())
+                     queue_store=temp_store(), outbox=temp_outbox())
     response = TestClient(app, base_url="http://127.0.0.1:8765").get("/qr.svg")
     assert response.status_code == 200
     assert response.headers["content-type"] == "image/svg+xml"
@@ -278,3 +293,31 @@ def test_chosen_tickets_become_one_queued_task(fake_sessions, tmp_path):
     assert task["status"] == "queued"
     assert "- T-1: E2E: checkout" in task["prompt"] and "- T-2: E2E: search" in task["prompt"]
     assert c.post("/api/jira/queue", json={"keys": ["NOPE-1"], "directory": str(tmp_path)}, headers=CHANGE).status_code == 400
+
+
+def test_a_slack_draft_is_sent_only_with_its_exact_text(fake_sessions):
+    c = client(fake_sessions)
+    d = c.post("/api/slack/drafts", json={"channel": "#internal", "text": "hello"}, headers=CHANGE).json()
+    assert c.post(f"/api/slack/drafts/{d['id']}/preview", headers=CHANGE).json() == {"notifies": "--- notifies: nobody"}
+    wrong = c.post(f"/api/slack/drafts/{d['id']}/send", json={"confirmed_text": "hello!"}, headers=CHANGE)
+    assert wrong.status_code == 409
+    sent = c.post(f"/api/slack/drafts/{d['id']}/send", json={"confirmed_text": "hello"}, headers=CHANGE).json()
+    assert sent["status"] == "sent"
+    again = c.post(f"/api/slack/drafts/{d['id']}/send", json={"confirmed_text": "hello"}, headers=CHANGE)
+    assert again.status_code == 409
+
+
+def test_queue_events_become_drafts_only_when_a_channel_is_configured(fake_sessions):
+    from ollagi.web import create_app
+
+    box = temp_outbox()
+    app = create_app(Config(slack_drafts_to="#me"), machine=machine(), sessions_api=fake_sessions,
+                     queue_store=temp_store(), outbox=box)
+    app.state.note_queue_event("task 3 done")
+    app.state.note_queue_event("task 4 started as session q4")  # not worth a draft
+    assert [(d.channel, d.text, d.status) for d in box.all()] == [("#me", "ollagi: task 3 done", "draft")]
+
+    quiet = temp_outbox()
+    app = create_app(Config(), machine=machine(), sessions_api=fake_sessions, queue_store=temp_store(), outbox=quiet)
+    app.state.note_queue_event("task 3 done")
+    assert quiet.all() == []

@@ -163,3 +163,11 @@ textarea { width: 100%; padding: 12px; border-radius: 10px; border: 1px solid va
 .jgroup .key { font: 600 13px var(--mono); color: var(--accent); text-decoration: none; }
 .jgroup .actions { display: flex; gap: 8px; margin-top: 8px; }
 .jgroup .actions button { padding: 8px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--raised); font: 13px var(--mono); }
+
+/* ---- Slack outbox ---------------------------------------------------------------------------- */
+.draft { border: 1px solid var(--line); border-radius: var(--radius); padding: 12px; margin-top: 10px; background: var(--bg); }
+.draft pre { margin: 6px 0; white-space: pre-wrap; font: 13px/1.4 var(--mono); }
+.draft .meta-line { font: 12px var(--mono); color: var(--muted); }
+.draft .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; align-items: center; }
+.draft .actions button { padding: 8px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--raised); font: 13px var(--mono); }
+.draft .actions .send-draft { border-color: var(--accent); color: var(--accent); }
