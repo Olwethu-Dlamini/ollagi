@@ -4,7 +4,7 @@ Everything has a default, so ollagi works with no file at all. Example file:
 
     port = 8765
     allowed_login = "me@example.com"     # the Tailscale login allowed in through `tailscale serve`
-    allowed_hosts = ["omarchy.tail653118.ts.net"]
+    allowed_hosts = ["laptop.example-tailnet.ts.net"]
 
     [[projects]]
     name = "simedia"

@@ -65,7 +65,7 @@ script instead of claude, to prove the real commands work together.
 ## Tailscale, MagicDNS and `tailscale serve`
 
 - Tailscale joins my devices into a private network (a tailnet) over WireGuard, an encrypted tunnel.
-  Each device gets an address like 100.x.y.z and a MagicDNS name like `omarchy.tail653118.ts.net`
+  Each device gets an address like 100.x.y.z and a MagicDNS name like `laptop.example-tailnet.ts.net`
   that only works inside the tailnet.
 - `tailscale serve` makes a local server reachable on the tailnet: it receives requests on the
   device's tailnet address and forwards them to 127.0.0.1. It adds headers saying who sent the

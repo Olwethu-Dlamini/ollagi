@@ -1,6 +1,6 @@
 from ollagi.access import check
 
-TAILNET = ("omarchy.tail653118.ts.net",)
+TAILNET = ("laptop.example-tailnet.ts.net",)
 ME = "me@example.com"
 
 
@@ -10,12 +10,12 @@ def test_the_laptops_own_browser_may_read_and_change():
 
 
 def test_my_phone_through_tailscale_serve_is_allowed():
-    headers = {"host": "omarchy.tail653118.ts.net", "tailscale-user-login": ME, "x-ollagi": "1"}
+    headers = {"host": "laptop.example-tailnet.ts.net", "tailscale-user-login": ME, "x-ollagi": "1"}
     assert check("POST", headers, ME, TAILNET).allowed
 
 
 def test_someone_else_on_the_tailnet_is_refused():
-    headers = {"host": "omarchy.tail653118.ts.net", "tailscale-user-login": "guest@example.com"}
+    headers = {"host": "laptop.example-tailnet.ts.net", "tailscale-user-login": "guest@example.com"}
     decision = check("GET", headers, ME, TAILNET)
     assert not decision.allowed
     assert "guest@example.com" in decision.reason
@@ -34,4 +34,4 @@ def test_a_change_without_the_ollagi_header_is_refused():
 
 
 def test_host_names_are_compared_without_case():
-    assert check("GET", {"host": "OMARCHY.tail653118.ts.net"}, ME, TAILNET).allowed
+    assert check("GET", {"host": "LAPTOP.example-tailnet.ts.net"}, ME, TAILNET).allowed

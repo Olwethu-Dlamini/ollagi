@@ -1,7 +1,7 @@
 """What Tailscale knows about this machine: its tailnet name and the login that owns it.
 
 `tailscale status --json` describes the tailnet. Two values matter here:
-- `Self.DNSName`, e.g. "omarchy.tail653118.ts.net." (MagicDNS name; the final dot is DNS notation);
+- `Self.DNSName`, e.g. "laptop.example-tailnet.ts.net." (MagicDNS name; the final dot is DNS notation);
 - the login of the user who owns this machine, looked up through `Self.UserID` in `User`.
 
 ollagi uses them as safe defaults: the page accepts its tailnet name as a host, and only the owner's
