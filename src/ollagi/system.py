@@ -9,6 +9,7 @@ depending on the machine they run on.
 """
 
 import os
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -70,3 +71,63 @@ def read_memory(proc: Path = Path("/proc")) -> Memory:
 
 def read_load(proc: Path = Path("/proc"), cpus: int | None = None) -> Load:
     return parse_loadavg((proc / "loadavg").read_text(), cpus or os.cpu_count() or 1)
+
+
+@dataclass(frozen=True)
+class Pressure:
+    """Share of time (percent) some task was stalled waiting for memory, over 10 s and 60 s.
+
+    From /proc/pressure/memory (PSI, "pressure stall information"). Free memory says how close the
+    edge is; pressure says whether it already hurts: programs are waiting on memory right now.
+    """
+
+    some_avg10: float
+    some_avg60: float
+
+
+@dataclass(frozen=True)
+class Disk:
+    mount: str
+    total: int
+    free: int
+
+
+def parse_pressure(text: str) -> Pressure:
+    """The "some" line looks like: some avg10=0.03 avg60=0.18 avg300=0.11 total=16738408"""
+    for line in text.splitlines():
+        if line.startswith("some "):
+            fields = dict(part.split("=") for part in line.split()[1:])
+            return Pressure(some_avg10=float(fields["avg10"]), some_avg60=float(fields["avg60"]))
+    raise ValueError("no 'some' line in pressure file")
+
+
+REAL_FILESYSTEMS = {"ext4", "ext3", "btrfs", "xfs", "vfat", "exfat", "ntfs3", "ntfs", "fuseblk", "f2fs"}
+
+
+def parse_mounts(text: str) -> list[str]:
+    """Mount points of real disks from /proc/mounts, one per device (a device can be mounted twice)."""
+    seen, mounts = set(), []
+    for line in text.splitlines():
+        device, mount, fstype = line.split()[:3]
+        if fstype in REAL_FILESYSTEMS and device not in seen:
+            seen.add(device)
+            mounts.append(mount.replace("\\040", " "))  # /proc/mounts writes a space as \040
+    return mounts
+
+
+def read_pressure(proc: Path = Path("/proc")) -> Pressure | None:
+    try:
+        return parse_pressure((proc / "pressure" / "memory").read_text())
+    except FileNotFoundError:  # kernels without PSI
+        return None
+
+
+def read_disks(proc: Path = Path("/proc")) -> list[Disk]:
+    disks = []
+    for mount in parse_mounts((proc / "mounts").read_text()):
+        try:
+            usage = shutil.disk_usage(mount)
+        except OSError:
+            continue
+        disks.append(Disk(mount=mount, total=usage.total, free=usage.free))
+    return disks
