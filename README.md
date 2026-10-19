@@ -23,7 +23,8 @@ Early. Built in small steps, one idea per commit, so every part can be read and 
 | 4 | Web interface: sessions and system, usable on a phone | done |
 | 4b | Tailscale: `tailscale serve`, `ollagi qr`, user service | done |
 | 5 | RAM watcher: freeze the heaviest session at red, thaw at green | done |
-| 5b | Overnight queue, one task at a time | planned |
+| 5b | Overnight queue, one task at a time | done |
+| 5c | Sessions-first page (state dots, menu buttons, colours), after Collie and Codeman | done |
 | 6 | Ticket batching from Jira | planned |
 | 7 | Projects from a config file | planned |
 
