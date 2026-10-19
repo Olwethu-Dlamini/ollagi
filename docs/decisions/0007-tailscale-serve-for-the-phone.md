@@ -5,9 +5,10 @@ Date: 2026-10-19
 ## Context
 
 The page listens on 127.0.0.1 (0006), so only the laptop can open it. My phone and laptop are both
-on my tailnet (Tailscale's private network between my own devices). This laptop's tailnet name is
-`laptop.example-tailnet.ts.net`. HTTPS certificates are not enabled for the tailnet yet
-(`tailscale status --json` shows no `CertDomains`).
+on my tailnet (Tailscale's private network between my own devices). The laptop has a tailnet name
+of the form `laptop.example-tailnet.ts.net` (an example; the real name is not written in this
+public repo). HTTPS certificates are not enabled for the tailnet yet (`tailscale status --json`
+shows no `CertDomains`).
 
 ## Decision
 

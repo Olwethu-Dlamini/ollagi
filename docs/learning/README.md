@@ -108,3 +108,11 @@ SQLite is a database in one file, built into Python (`sqlite3`). The queue's ser
 web page's requests both use it, from different threads. Two threads inside one connection at the
 same moment can break it, so every database method in `queue.py` takes a lock first
 (`threading.RLock`): one thread at a time, the others wait their turn for a few microseconds.
+
+## Jaccard similarity and union-find (ticket grouping)
+
+- Jaccard similarity of two sets = how many items are in both / how many are in either. Titles
+  `{login, cookie, page}` and `{cookie, banner, page}` share 2 of 4 words: 0.5.
+- Union-find joins things into groups through links: every ticket starts as its own group, and
+  each link merges two groups. If A is like B and B is like C, A, B and C end up together even if
+  A and C look nothing alike. That is why a group's reason may list its links.
