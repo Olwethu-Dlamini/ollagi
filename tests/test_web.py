@@ -18,6 +18,7 @@ class FakeSessions:
     def __init__(self):
         self.running = {"demo": "/work/demo"}
         self.frozen = set()
+        self.screens = {}
         self.sent = []
 
     def names(self):
@@ -26,8 +27,8 @@ class FakeSessions:
     def info(self, name):
         return SessionInfo(name, self.running[name], 4242, 1_000_000, True, 300 * MIB, 500 * MIB)
 
-    def screen(self, name, lines=200):
-        return "Claude is waiting for you"
+    def screen(self, name, lines=200, colours=False):
+        return self.screens.get(name, "Claude is waiting for you")
 
     def start(self, name, directory):
         if name in self.running:
@@ -103,6 +104,7 @@ def test_sessions_are_listed_and_their_screen_is_readable(fake_sessions):
     c = client(fake_sessions)
     assert [s["name"] for s in c.get("/api/sessions").json()] == ["demo"]
     assert c.get("/api/sessions/demo/screen").json()["text"] == "Claude is waiting for you"
+    assert c.get("/api/sessions").json()[0]["project"] == "demo"  # not under a configured project
     assert c.get("/api/sessions/nope/screen").status_code == 404
 
 
@@ -152,7 +154,8 @@ def test_whoami_names_the_tailscale_login_or_this_machine(fake_sessions):
 def test_a_frozen_session_says_so_and_refuses_typing_until_thawed(fake_sessions):
     c = client(fake_sessions)
     assert c.post("/api/sessions/demo/freeze", headers=CHANGE).status_code == 200
-    assert c.get("/api/sessions/demo/screen").json() == {"name": "demo", "frozen": True, "text": None}
+    assert c.get("/api/sessions/demo/screen").json()["frozen"] is True
+    assert c.get("/api/sessions/demo/screen").json()["text"] is None
     assert c.post("/api/sessions/demo/send", json={"text": "hi"}, headers=CHANGE).status_code == 409
     assert c.post("/api/sessions/demo/thaw", headers=CHANGE).status_code == 200
     assert c.get("/api/sessions/demo/screen").json()["frozen"] is False
@@ -192,3 +195,21 @@ def test_qr_code_is_an_svg_of_the_phone_address(fake_sessions):
     assert response.status_code == 200
     assert response.headers["content-type"] == "image/svg+xml"
     assert response.text.lstrip().startswith("<?xml") or "<svg" in response.text
+
+
+def test_a_session_waiting_on_a_permission_shows_its_question_and_choices(fake_sessions):
+    from pathlib import Path
+
+    fixture = Path(__file__).parent / "fixtures" / "collie" / "claude--permission-bash.txt"
+    fake_sessions.screens["demo"] = fixture.read_text()
+    c = client(fake_sessions)
+    listed = c.get("/api/sessions").json()[0]
+    assert (listed["state"], listed["question"]) == ("needs_you", "Do you want to proceed?")
+    screen = c.get("/api/sessions/demo/screen").json()
+    assert [o["number"] for o in screen["options"]] == [1, 2, 3]
+    assert screen["options"][2]["label"] == "No"
+
+
+def test_sessions_are_grouped_under_their_configured_project(fake_sessions):
+    fake_sessions.running = {"sd-1": "/work/DATA!/Admin-Api"}
+    assert client(fake_sessions).get("/api/sessions").json()[0]["project"] == "simedia"

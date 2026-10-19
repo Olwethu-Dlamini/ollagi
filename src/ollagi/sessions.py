@@ -34,7 +34,8 @@ PREFIX = "ollagi-"
 WINDOW = "main"
 NAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{0,31}$")
 # Keys the page may press. Anything else is refused, so a request cannot send arbitrary tmux keys.
-ALLOWED_KEYS = {"Enter", "Escape", "C-c", "Up", "Down", "Left", "Right", "Tab", "BTab", "y", "n", "1", "2", "3"}
+ALLOWED_KEYS = {"Enter", "Escape", "C-c", "Up", "Down", "Left", "Right", "Tab", "BTab", "Space", "BSpace", "y", "n",
+                *"123456789"}
 CGROUP_ROOT = Path("/sys/fs/cgroup")
 STATE_DIR = Path.home() / ".local" / "share" / "ollagi" / "sessions"
 
@@ -197,9 +198,11 @@ def thaw(name: str, run: Run = run_command) -> None:
     run(["systemctl", "--user", "thaw", slice_unit(name)])
 
 
-def screen(name: str, lines: int = 200, run: Run = run_command) -> str:
-    """The last `lines` lines of the session's window, as plain text."""
-    result = run(tmux(name, "capture-pane", "-p", "-J", "-t", WINDOW, "-S", f"-{lines}"))
+def screen(name: str, lines: int = 200, colours: bool = False, run: Run = run_command) -> str:
+    """The last `lines` lines of the session's window. With colours=True the text keeps the
+    terminal's colour codes (`capture-pane -e`), which the page turns into coloured text."""
+    flags = ["-p", "-J", *(["-e"] if colours else []), "-t", WINDOW, "-S", f"-{lines}"]
+    result = run(tmux(name, "capture-pane", *flags))
     return result.stdout.rstrip("\n")
 
 

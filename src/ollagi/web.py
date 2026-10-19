@@ -28,7 +28,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel
 
-from ollagi import access, sessions, system, watcher as watching
+from ollagi import access, claude_screen, sessions, system, watcher as watching
 from ollagi.budget import Limits, how_many_can_start
 from ollagi.config import Config
 from ollagi.processes import find_sessions, read_processes
@@ -158,13 +158,34 @@ def create_app(config: Config, machine=None, sessions_api=sessions, run_watcher=
             "projects": [asdict(p) for p in config.projects],
         }
 
+    def project_of(directory: str) -> str:
+        """The configured project a folder belongs to, else the folder's own name."""
+        for project in config.projects:
+            if directory == project.directory or directory.startswith(project.directory.rstrip("/") + "/"):
+                return project.name
+        return Path(directory).name or directory
+
+    def state_of(name: str, info) -> claude_screen.Reading:
+        if info.frozen:
+            return claude_screen.Reading("frozen")
+        if not info.alive:
+            return claude_screen.Reading("exited")
+        return claude_screen.read(sessions_api.screen(name, lines=80))
+
     @app.get("/api/sessions")
     def list_sessions():
         now = time.time()
         found = []
         for name in sessions_api.names():
             info = sessions_api.info(name)
-            found.append({**asdict(info), "age_seconds": int(now - info.created)})
+            reading = state_of(name, info)
+            found.append({
+                **asdict(info),
+                "age_seconds": int(now - info.created),
+                "project": project_of(info.directory),
+                "state": reading.state,
+                "question": reading.question,
+            })
         return found
 
     @app.get("/api/sessions/{name}/screen")
@@ -172,8 +193,13 @@ def create_app(config: Config, machine=None, sessions_api=sessions, run_watcher=
         _require_session(sessions_api, name)
         if sessions_api.scope_state(name)[0]:
             # Not an error: the session is fine, its tmux is just paused and cannot draw the screen.
-            return {"name": name, "frozen": True, "text": None}
-        return {"name": name, "frozen": False, "text": sessions_api.screen(name, lines=min(max(lines, 10), 2000))}
+            return {"name": name, "frozen": True, "text": None, "state": "frozen", "question": None, "options": []}
+        text = sessions_api.screen(name, lines=min(max(lines, 10), 2000), colours=True)
+        reading = claude_screen.read(text)
+        return {
+            "name": name, "frozen": False, "text": text, "state": reading.state,
+            "question": reading.question, "options": [asdict(o) for o in reading.options],
+        }
 
     @app.post("/api/sessions")
     def start_session(body: StartRequest):
