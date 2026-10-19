@@ -2,16 +2,17 @@ from ollagi.budget import GIB, Limits, how_many_can_start
 from ollagi.system import MIB, Load, Memory
 
 CALM = Load(one_minute=1.0, five_minutes=1.0, cpus=8)
-LIMITS = Limits(keep_free=int(1.5 * GIB), per_session=int(1.5 * GIB), max_sessions=2)
+LIMITS = Limits(keep_free=int(1.5 * GIB), per_session=int(1.5 * GIB))
 
 
 def memory(available_gib: float) -> Memory:
     return Memory(total=12 * GIB, available=int(available_gib * GIB), swap_total=0, swap_free=0)
 
 
-def test_an_idle_machine_with_plenty_of_ram_is_capped_by_max_sessions():
+def test_there_is_no_fixed_cap_memory_decides():
+    # 10 available - 1.5 kept free = 8.5, which fits five sessions of 1.5
     verdict = how_many_can_start(memory(10), CALM, [], LIMITS)
-    assert verdict.can_start == 2
+    assert verdict.can_start == 5
 
 
 def test_memory_left_after_the_reserve_decides_the_count():
@@ -24,16 +25,14 @@ def test_memory_left_after_the_reserve_decides_the_count():
 def test_a_running_session_keeps_room_to_grow():
     # One session using 400 MiB may still grow by about 1.1 GiB, so that is set aside:
     # 4.5 - 1.5 - 1.1 = 1.9 left, which fits one more, not two.
-    # max_sessions is raised to 3 so memory, not the session limit, decides the answer.
-    roomy = Limits(keep_free=LIMITS.keep_free, per_session=LIMITS.per_session, max_sessions=3)
-    verdict = how_many_can_start(memory(4.5), CALM, [400 * MIB], roomy)
+    verdict = how_many_can_start(memory(4.5), CALM, [400 * MIB], LIMITS)
     assert verdict.can_start == 1
 
 
-def test_no_new_session_when_the_limit_is_reached():
+def test_running_sessions_only_cost_their_growth_room():
+    # Two sessions at 400 MiB reserve about 2.2 GiB of growth: 10 - 1.5 - 2.2 = 6.3, fits four.
     verdict = how_many_can_start(memory(10), CALM, [400 * MIB, 400 * MIB], LIMITS)
-    assert verdict.can_start == 0
-    assert "limit is 2" in verdict.reason
+    assert verdict.can_start == 4
 
 
 def test_no_new_session_when_the_cpus_are_overloaded():

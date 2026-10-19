@@ -32,17 +32,18 @@ uv run ollagi doctor  # is there room for another Claude session?
 uv run pytest         # run the tests
 ```
 
-`ollagi doctor` on this laptop, 2026-10-19 (two sessions already open):
+`ollagi doctor` on this laptop, 2026-10-19 12:15 (two sessions already open):
 
 ```
-memory    4.3 GiB available of 11.4 GiB
-swap      1.8 GiB used of 22.8 GiB (not counted as available)
-cpu load  2.51 (1 min), 2.56 (5 min) on 8 threads
+memory    5.3 GiB available of 11.4 GiB
+swap      1.6 GiB used of 22.8 GiB (not counted as available)
+cpu load  1.84 (1 min), 2.22 (5 min) on 8 threads
 sessions  2 running
-          pid 273043: 341 MiB across 3 processes
-          pid 275800: 422 MiB across 4 processes
-start another? no: 0 more can start
-          2 sessions running, the limit is 2
+          pid 273043: 308 MiB across 1 processes
+          pid 275800: 440 MiB across 5 processes
+start another? yes: 1 more can start
+          5.3 GiB available, minus 1.5 GiB kept free, minus 2.3 GiB growth room for 2 running session(s), leaves 1.5 GiB; each new session needs 1.5 GiB
+(exit status 0)
 ```
 
 ## How to read this repo
