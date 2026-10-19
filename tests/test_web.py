@@ -84,11 +84,27 @@ def fake_sessions():
     return FakeSessions()
 
 
-def client(fake_sessions, available_gib=8.0, **config):
+class FakeJira:
+    """Invented tickets only: this repo is public."""
+
+    def __init__(self):
+        self.calls = 0
+
+    def my_open_tickets(self):
+        from ollagi.jira import Ticket
+
+        self.calls += 1
+        t = lambda key, summary: Ticket(key, summary, "To Do", (), None, "Task", f"https://j.example/browse/{key}")  # noqa: E731
+        return [t("T-1", "E2E: checkout - 3 test(s) failing"), t("T-2", "E2E: search - 1 test(s) failing"),
+                t("T-3", "Export the yearly report")]
+
+
+def client(fake_sessions, available_gib=8.0, jira=None, **config):
     from ollagi.web import create_app
 
     cfg = Config(projects=(Project("simedia", "/work/DATA!"),), **config)
-    app = create_app(cfg, machine=machine(available_gib), sessions_api=fake_sessions, queue_store=temp_store())
+    app = create_app(cfg, machine=machine(available_gib), sessions_api=fake_sessions, queue_store=temp_store(),
+                     jira_client=jira or FakeJira())
     return TestClient(app, base_url="http://127.0.0.1:8765")
 
 
@@ -241,3 +257,24 @@ def test_tasks_are_added_listed_cancelled_and_the_queue_paused(fake_sessions, tm
 def test_a_task_needs_a_real_folder(fake_sessions):
     c = client(fake_sessions)
     assert c.post("/api/queue", json={"directory": "/nope", "prompt": "x"}, headers=CHANGE).status_code == 400
+
+
+def test_tickets_are_grouped_and_jira_is_asked_at_most_every_five_minutes(fake_sessions):
+    jira = FakeJira()
+    c = client(fake_sessions, jira=jira)
+    data = c.get("/api/jira/groups").json()
+    assert [[t["key"] for t in g["tickets"]] for g in data["groups"]] == [["T-1", "T-2"]]
+    assert [t["key"] for t in data["ungrouped"]] == ["T-3"]
+    c.get("/api/jira/groups")
+    assert jira.calls == 1  # served from the cache
+    c.get("/api/jira/groups?refresh=true")
+    assert jira.calls == 2
+
+
+def test_chosen_tickets_become_one_queued_task(fake_sessions, tmp_path):
+    c = client(fake_sessions)
+    c.get("/api/jira/groups")
+    task = c.post("/api/jira/queue", json={"keys": ["T-1", "T-2"], "directory": str(tmp_path)}, headers=CHANGE).json()
+    assert task["status"] == "queued"
+    assert "- T-1: E2E: checkout" in task["prompt"] and "- T-2: E2E: search" in task["prompt"]
+    assert c.post("/api/jira/queue", json={"keys": ["NOPE-1"], "directory": str(tmp_path)}, headers=CHANGE).status_code == 400

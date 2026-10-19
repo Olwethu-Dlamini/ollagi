@@ -142,7 +142,7 @@ $("new-form").onsubmit = async (event) => {
 };
 
 function fillProjects() {
-  for (const id of ["new-project", "task-project"]) {
+  for (const id of ["new-project", "task-project", "jira-project"]) {
     const select = $(id);
     if (select.dataset.filled) continue;
     select.append(Object.assign(el("option", "choose a project…"), { value: "" }));
@@ -352,6 +352,62 @@ $("task-form").onsubmit = async (event) => {
     refreshQueue();
   } catch (error) { $("task-error").textContent = error.message; }
 };
+
+// ---- Jira groups (read only) -------------------------------------------------------------------
+const PRESELECT = 5;  // tick at most this many per group by default: a big group is too much for one session
+// Finished work waiting for a reviewer stays visible but is not ticked by default, and sorts last.
+const WAITING_FOR_REVIEW = new Set(["To Be Checked"]);
+
+$("jira-load").onclick = () => loadJira(true);
+
+async function loadJira(refresh) {
+  $("jira-load").textContent = "Loading…";
+  try {
+    const data = await api(`/api/jira/groups${refresh ? "?refresh=true" : ""}`);
+    const read = new Date(data.read_at * 1000).toLocaleTimeString();
+    $("jira-note").textContent = `${data.tickets} open tickets, ${data.groups.length} groups, read from Jira at ${read}. ` +
+      "Read only: nothing here changes a ticket.";
+    $("jira-project").hidden = false;
+    $("jira-groups").replaceChildren(...data.groups.map(groupCard));
+  } catch (error) {
+    $("jira-note").textContent = error.message;
+  }
+  $("jira-load").textContent = "Reload";
+}
+
+function groupCard(g) {
+  const card = el("div", null, "jgroup");
+  card.append(el("p", `${g.tickets.length} tickets · ${g.reason}`, "why"));
+  const ordered = [...g.tickets].sort((a, b) => WAITING_FOR_REVIEW.has(a.status) - WAITING_FOR_REVIEW.has(b.status));
+  let ticked = 0;
+  const boxes = ordered.map((t) => {
+    const label = el("label");
+    const tick = !WAITING_FOR_REVIEW.has(t.status) && ticked < PRESELECT;
+    if (tick) ticked++;
+    const box = Object.assign(document.createElement("input"), { type: "checkbox", checked: tick, value: t.key });
+    const text = el("span");
+    const link = Object.assign(el("a", t.key, "key"), { href: t.url, target: "_blank", rel: "noopener" });
+    text.append(link, ` ${t.summary} `, el("span", `(${t.status})`, "muted"));
+    label.append(box, text);
+    card.append(label);
+    return box;
+  });
+  const actions = el("div", null, "actions");
+  const result = el("span", null, "muted");
+  actions.append(button("Queue ticked as one task", async () => {
+    const keys = boxes.filter((b) => b.checked).map((b) => b.value);
+    const directory = $("jira-project").value;
+    if (!keys.length) { result.textContent = "Tick at least one ticket."; return; }
+    if (!directory) { result.textContent = "Choose a project above first."; return; }
+    try {
+      const task = await api("/api/jira/queue", { keys, directory });
+      result.textContent = `Queued as task ${task.id}.`;
+      refreshQueue();
+    } catch (error) { result.textContent = error.message; }
+  }), result);
+  card.append(actions);
+  return card;
+}
 
 // ---- system ----------------------------------------------------------------------------------
 const LEVEL_WORD = { green: "green", amber: "amber", red: "red" };

@@ -15,6 +15,8 @@
     POST /api/queue/{id}/cancel         cancel a queued task
     POST /api/queue/pause | /resume     hold or release the queue
     GET  /api/queue/{id}/result         a finished task's final screen, as text
+    GET  /api/jira/groups               my open Jira tickets, grouped (read only, cached 5 minutes)
+    POST /api/jira/queue                queue chosen tickets as one task {"keys", "directory"}
     GET  /qr.svg                        the phone address as a QR code
 
 `create_app` receives the machine readers and the sessions module as arguments. The real server
@@ -35,7 +37,7 @@ from pydantic import BaseModel
 
 from collections import deque
 
-from ollagi import access, claude_screen, queue as queueing, sessions, system, watcher as watching
+from ollagi import access, claude_screen, grouping, queue as queueing, sessions, system, watcher as watching
 from ollagi.budget import Limits, how_many_can_start
 from ollagi.config import Config
 from ollagi.processes import find_sessions, read_processes
@@ -70,8 +72,15 @@ class TaskRequest(BaseModel):
     prompt: str
 
 
+class TicketsRequest(BaseModel):
+    keys: list[str]
+    directory: str
+
+JIRA_CACHE_SECONDS = 300
+
+
 def create_app(config: Config, machine=None, sessions_api=sessions, run_watcher=False, phone_url=None,
-               queue_store=None, run_queue=False, command_for=None, results_dir=None) -> FastAPI:
+               queue_store=None, run_queue=False, command_for=None, results_dir=None, jira_client=None) -> FastAPI:
     machine = machine or real_machine()
     watcher = watching.Watcher(config.watcher)
     store = queue_store or queueing.Store()
@@ -316,6 +325,43 @@ def create_app(config: Config, machine=None, sessions_api=sessions, run_watcher=
         if not path.exists():
             raise HTTPException(404, f"no saved result for task {task_id}")
         return {"id": task_id, "text": path.read_text()}
+
+    jira_cache = {"time": 0.0, "tickets": []}
+
+    def my_tickets(refresh: bool = False):
+        """Open tickets, read from Jira at most every 5 minutes unless a refresh is asked for."""
+        if refresh or time.time() - jira_cache["time"] > JIRA_CACHE_SECONDS:
+            from ollagi.jira import Jira
+
+            client = jira_client or Jira()
+            jira_cache.update(time=time.time(), tickets=client.my_open_tickets())
+        return jira_cache["tickets"]
+
+    @app.get("/api/jira/groups")
+    def jira_groups(refresh: bool = False):
+        try:
+            tickets = my_tickets(refresh)
+        except (OSError, KeyError, ValueError) as error:  # no ~/.jira.env, no network, a bad answer
+            raise HTTPException(502, f"could not read Jira: {error}") from error
+        groups = grouping.group(tickets)
+        grouped = {t.key for g in groups for t in g.tickets}
+        return {
+            "read_at": jira_cache["time"],
+            "tickets": len(tickets),
+            "groups": [{"reason": g.reason, "tickets": [asdict(t) for t in g.tickets]} for g in groups],
+            "ungrouped": [asdict(t) for t in tickets if t.key not in grouped],
+        }
+
+    @app.post("/api/jira/queue")
+    def queue_tickets(body: TicketsRequest):
+        by_key = {t.key: t for t in my_tickets()}
+        chosen = [by_key[k] for k in body.keys if k in by_key]
+        if not chosen:
+            raise HTTPException(400, "none of those tickets are in my open tickets")
+        try:
+            return asdict(store.add(body.directory, grouping.prompt_for(chosen)))
+        except ValueError as error:
+            raise HTTPException(400, str(error)) from error
 
     @app.post("/api/sessions/{name}/freeze")
     def freeze(name: str):

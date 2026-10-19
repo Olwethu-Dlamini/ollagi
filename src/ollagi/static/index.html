@@ -53,6 +53,13 @@
 
   <div id="tasks"></div>
   <ul class="events" id="queue-events"></ul>
+
+  <section class="card" style="margin-top:16px">
+    <div class="kv"><h2 style="margin:0">My Jira tickets, grouped</h2><button class="plain" id="jira-load">Load</button></div>
+    <p class="muted" id="jira-note">Read only. Tick the tickets to work on together, choose a project, and queue them as one task.</p>
+    <select id="jira-project" hidden></select>
+    <div id="jira-groups"></div>
+  </section>
 </main>
 
 <!-- ===== System: the machine, the watcher, disks, processes ============================ -->

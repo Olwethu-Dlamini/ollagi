@@ -153,3 +153,13 @@ textarea { width: 100%; padding: 12px; border-radius: 10px; border: 1px solid va
 .dot.failed { background: var(--needs); }
 .dot.limited { background: var(--working); }
 .dot.cancelled { background: var(--line); }
+
+/* ---- Jira groups ---------------------------------------------------------------------------- */
+.jgroup { border: 1px solid var(--line); border-radius: var(--radius); padding: 12px; margin-top: 10px; background: var(--bg); }
+.jgroup .why { font: 12px var(--mono); color: var(--muted); margin: 0 0 8px; }
+.jgroup label { display: grid; grid-template-columns: 20px 1fr; gap: 8px; align-items: start; padding: 6px 0; border-top: 1px solid var(--line); }
+.jgroup label:first-of-type { border-top: 0; }
+.jgroup input[type=checkbox] { width: 18px; height: 18px; margin-top: 2px; }
+.jgroup .key { font: 600 13px var(--mono); color: var(--accent); text-decoration: none; }
+.jgroup .actions { display: flex; gap: 8px; margin-top: 8px; }
+.jgroup .actions button { padding: 8px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--raised); font: 13px var(--mono); }
