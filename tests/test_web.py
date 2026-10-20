@@ -181,14 +181,15 @@ class CatTerminals:
 
 
 def client(fake_sessions, available_gib=8.0, jira=None, outbox=None, outside_api=None, windows=None, terminals=None,
-           **config):
+           summariser=None, **config):
     from ollagi.web import create_app
 
     cfg = Config(projects=(Project("simedia", "/work/DATA!"),), **config)
     app = create_app(cfg, machine=machine(available_gib), sessions_api=fake_sessions, queue_store=temp_store(),
                      jira_client=jira or FakeJira(), outbox=outbox or temp_outbox(), outside_api=outside_api or FakeOutside(),
                      desktop_api=windows if windows is not None else FakeWindows(),
-                     open_terminal=terminals if terminals is not None else CatTerminals())
+                     open_terminal=terminals if terminals is not None else CatTerminals(),
+                     summarise=summariser or FakeSummariser())
     return TestClient(app, base_url="http://127.0.0.1:8765")
 
 
@@ -537,3 +538,62 @@ def test_the_page_is_told_when_the_terminal_ends(fake_sessions):
             while True:
                 ws.receive_bytes()
     assert ended.value.code == 1000
+
+
+# Summaries (docs/decisions/0019): a fake summariser, so no tokens are spent.
+
+class FakeSummariser:
+    def __init__(self, error=None):
+        self.screens = []
+        self.error = error
+
+    def __call__(self, screen):
+        from ollagi.summary import Summary
+
+        self.screens.append(screen)
+        if self.error:
+            raise self.error
+        return Summary("Running tests.\nWaiting for your OK.\nNext: press 1.", "claude-haiku-4-5-20251001", 600, 90, 2.2, 0.001)
+
+
+def test_a_summary_is_written_from_the_screen_on_request(fake_sessions):
+    fake_sessions.screens["demo"] = "42 passed\n❯ 1. Yes"
+    summariser = FakeSummariser()
+    data = client(fake_sessions, summariser=summariser).post("/api/sessions/demo/summary", headers=CHANGE).json()
+    assert data["text"].startswith("Running tests.")
+    assert (data["model"], data["input_tokens"], data["output_tokens"]) == ("claude-haiku-4-5-20251001", 600, 90)
+    assert summariser.screens == ["42 passed\n❯ 1. Yes"]
+
+
+def test_a_summary_spends_tokens_so_another_site_cannot_ask_for_one(fake_sessions):
+    summariser = FakeSummariser()
+    assert client(fake_sessions, summariser=summariser).post("/api/sessions/demo/summary").status_code == 403
+    assert summariser.screens == []
+
+
+def test_no_summary_for_an_unknown_or_frozen_session(fake_sessions):
+    summariser = FakeSummariser()
+    c = client(fake_sessions, summariser=summariser)
+    assert c.post("/api/sessions/nope/summary", headers=CHANGE).status_code == 404
+    fake_sessions.frozen.add("demo")
+    assert c.post("/api/sessions/demo/summary", headers=CHANGE).status_code == 409
+    assert summariser.screens == []
+
+
+def test_one_summary_at_a_time(fake_sessions):
+    summariser = FakeSummariser()
+    c = client(fake_sessions, summariser=summariser)
+    with c.app.state.summary_lock:  # as if another tap's summary were still being written
+        response = c.post("/api/sessions/demo/summary", headers=CHANGE)
+    assert response.status_code == 409
+    assert "already" in response.json()["detail"]
+    assert summariser.screens == []
+
+
+def test_a_failed_summary_says_why(fake_sessions):
+    from ollagi.summary import SummaryError
+
+    c = client(fake_sessions, summariser=FakeSummariser(error=SummaryError("Claude AI usage limit reached")))
+    response = c.post("/api/sessions/demo/summary", headers=CHANGE)
+    assert response.status_code == 502
+    assert "usage limit" in response.json()["detail"]

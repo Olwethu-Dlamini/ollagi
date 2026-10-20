@@ -7,6 +7,7 @@
     POST /api/sessions                  start a session   {"name", "directory", "force"}
     POST /api/sessions/{name}/send      type into it      {"text"} or {"key"}
     POST /api/sessions/{name}/stop      stop it
+    POST /api/sessions/{name}/summary   a short summary of its screen, written by Haiku (spends tokens)
     POST /api/sessions/{name}/freeze    pause it (nothing lost)
     POST /api/sessions/{name}/thaw      continue it
     GET  /api/watcher                   the RAM watcher's level, setting and recent events
@@ -45,7 +46,7 @@ from pydantic import BaseModel
 
 from collections import deque
 
-from ollagi import access, claude_screen, desktop, grouping, outside, queue as queueing, sessions, slack_outbox, system, terminal, watcher as watching
+from ollagi import access, claude_screen, desktop, grouping, outside, queue as queueing, sessions, slack_outbox, summary, system, terminal, watcher as watching
 from ollagi.budget import Limits, how_many_can_start
 from ollagi.config import Config
 from ollagi.processes import find_sessions, read_processes
@@ -113,13 +114,17 @@ DRAFT_WORTHY = (" done", "waiting for you", "usage limit", "failed")
 
 def create_app(config: Config, machine=None, sessions_api=sessions, run_watcher=False, phone_url=None,
                queue_store=None, run_queue=False, command_for=None, results_dir=None, jira_client=None,
-               outbox=None, outside_api=outside, desktop_api=None, open_terminal=None) -> FastAPI:
+               outbox=None, outside_api=outside, desktop_api=None, open_terminal=None, summarise=None) -> FastAPI:
     machine = machine or real_machine()
     # Windows on this laptop for a session (docs/decisions/0017). Only the page's Start and the
     # open/close button use them; the overnight queue never opens one.
     laptop = desktop_api or desktop.Laptop(config.desktop)
     # A live terminal in the browser (docs/decisions/0018): `tmux attach` in a pty. Tests pass `cat`.
     open_terminal = open_terminal or (lambda name, rows, cols: terminal.Terminal(terminal.session_command(name), rows, cols))
+    # Summaries (docs/decisions/0019) run `claude -p`; tests pass a fake that spends nothing.
+    summarise = summarise or summary.summarise
+    # One at a time: a double tap must not pay twice, and each run is a claude process of its own.
+    summary_lock = threading.Lock()
     watcher = watching.Watcher(config.watcher)
     store = queue_store or queueing.Store()
     drafts = outbox or slack_outbox.Outbox()
@@ -174,6 +179,7 @@ def create_app(config: Config, machine=None, sessions_api=sessions, run_watcher=
     app.state.watcher_act = act_for_watcher
     app.state.queue_runner = runner
     app.state.note_queue_event = note_queue_event
+    app.state.summary_lock = summary_lock
 
     @app.middleware("http")
     async def check_access(request: Request, call_next):
@@ -358,6 +364,20 @@ def create_app(config: Config, machine=None, sessions_api=sessions, run_watcher=
         except ValueError as error:
             raise HTTPException(400, str(error)) from error
         return {"sent": True}
+
+    @app.post("/api/sessions/{name}/summary")
+    def summarise_session(name: str):
+        # A POST, so the X-Ollagi rule applies: another website cannot spend my tokens.
+        _require_session(sessions_api, name)
+        _refuse_if_frozen(sessions_api, name)
+        if not summary_lock.acquire(blocking=False):
+            raise HTTPException(409, "a summary is already being written; wait for it")
+        try:
+            return asdict(summarise(sessions_api.screen(name, lines=200)))
+        except summary.SummaryError as error:
+            raise HTTPException(502, str(error)) from error
+        finally:
+            summary_lock.release()
 
     @app.post("/api/sessions/{name}/stop")
     def stop(name: str):
