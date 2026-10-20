@@ -33,6 +33,7 @@ Early. Built in small steps, one idea per commit, so every part can be read and 
 | 8c | A session as a window on the laptop: opens on start, open/close button, `ollagi open/close` | done |
 | 8d | Live: the session as a real terminal in the page (xterm.js over a WebSocket) | done |
 | 9 | Summary: a session's screen summarised by Haiku, only on request | done |
+| 9a | The session as a chat (Chat and Term tabs), voice into the message box, fits above the keyboard | done |
 | 9b | Installable app on the phone (needs HTTPS for the tailnet) | next |
 | 9c | Phone notifications through Web Push: needs you, finished, usage limit (needs HTTPS) | next |
 

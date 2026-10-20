@@ -167,3 +167,14 @@ same moment can break it, so every database method in `queue.py` takes a lock fi
   That is called prompt injection. The defences here: mark the screen as data (`<screen>` tags and
   a system prompt that says so), and give the model no tools, so even a fooled model can only write
   a wrong summary.
+
+## Secure contexts, speech recognition and the phone keyboard (decision 0020)
+
+- Browsers keep some powers for "secure contexts" only: pages on `https://`, or on the machine
+  itself (`localhost`, `127.0.0.1`). The microphone is one of them; installing a page as an app and
+  push notifications are others. `window.isSecureContext` says whether a page is one.
+- `SpeechRecognition` (in Chrome also `webkitSpeechRecognition`) turns speech into text. Chrome
+  sends the audio to Google's speech service to do it; the page only receives the words.
+- When a phone keyboard opens, a browser can shrink the whole page (`interactive-widget=
+  resizes-content` in the viewport tag asks for that) or only the visible part of it.
+  `window.visualViewport` tells the visible part's size, so a page can fit itself above the keyboard.
