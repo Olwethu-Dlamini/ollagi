@@ -146,6 +146,9 @@ class FakeOutside:
     def session_id_of(self, pid):
         return {4242: "conv-1"}.get(pid)  # FakeSessions' "demo" runs Claude as pid 4242
 
+    def is_claude(self, pid):
+        return pid in (4242, 4343)  # 4343: a Claude that has not written its session file yet
+
 
 class FakeWindows:
     """Stands in for desktop.Laptop: remembers which sessions got a window on the laptop."""
@@ -626,3 +629,17 @@ def test_a_frozen_sessions_conversation_is_not_looked_up(fake_sessions):
 
 def test_no_conversation_for_an_unknown_session(fake_sessions):
     assert client(fake_sessions).get("/api/sessions/nope/conversation").status_code == 404
+
+
+def test_a_new_claude_with_nothing_said_yet_is_still_a_claude(fake_sessions):
+    outside = FakeOutside()
+    outside.transcript_path = lambda session_id: None  # Claude writes the file with the first message
+    data = client(fake_sessions, outside_api=outside).get("/api/sessions/demo/conversation").json()
+    assert data == {"claude": True, "frozen": False, "title": None, "items": []}
+
+
+def test_a_claude_still_at_its_first_question_is_a_claude(fake_sessions):
+    # Before the "trust this folder?" question is answered, Claude has written no session file.
+    fake_sessions.info = lambda name: SessionInfo(name, "/tmp", 4343, 1_000_000, True, MIB, MIB)
+    data = client(fake_sessions).get("/api/sessions/demo/conversation").json()
+    assert data == {"claude": True, "frozen": False, "title": None, "items": []}

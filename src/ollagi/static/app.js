@@ -205,37 +205,62 @@ function fillProjects() {
   }
 }
 
-// ---- one session ------------------------------------------------------------------------------
-let screenTimer = null, lastText = "";
+// ---- one session: a chat, like a messaging app (docs/decisions/0020) ----------------------------
+// Chat shows the session's Claude conversation, read from Claude's own files (no tokens). Term
+// shows the screen itself: plain (a copy every 1.5 s) or Live (a real terminal, decision 0018).
+let screenTimer = null, chatTimer = null, lastText = "", lastChat = "", mode = "chat";
+let autoTerm = null;  // the session that was moved to Term because it runs no Claude
 
 function openViewer(name) {
-  if (name !== current) stopLive();  // a live terminal belongs to one session
+  if (name !== current) { stopLive(); lastChat = ""; $("chat-items").replaceChildren(); $("chat-ask").replaceChildren(); }
   current = name;
   lastText = "";
-  if (!$("panel-summary").hidden) showSummary();  // the summary shown belongs to the session shown
   $("viewer").hidden = false;
   $("v-menu").hidden = true;
+  $("switcher").hidden = true;
   $("screen").textContent = "";
-  refreshViewer();
-  pollViewer();
+  setMode(mode);
 }
 
-// The plain view reads the screen every 1.5 s. A live terminal draws itself, so the page then only
-// asks every 4 s, for the state dot, the laptop button and the menu buttons.
+function setMode(next) {
+  mode = next;
+  $("tab-chat").classList.toggle("on", mode === "chat");
+  $("tab-term").classList.toggle("on", mode === "term");
+  $("chat").hidden = mode !== "chat";
+  $("term").hidden = mode !== "term";
+  $("keys-row").hidden = mode !== "term";
+  if (mode !== "term") stopLive();
+  lastText = "";
+  refreshViewer();
+  if (mode === "chat") refreshChat(true);
+  pollViewer();
+}
+$("tab-chat").onclick = () => setMode("chat");
+$("tab-term").onclick = () => setMode("term");
+
+// The plain screen is read every 1.5 s. Chat and Live draw themselves, so the screen is then only
+// read every 4 s, for the state dot, the laptop button and a question's buttons.
 function pollViewer() {
   clearInterval(screenTimer);
-  screenTimer = setInterval(refreshViewer, live ? 4000 : 1500);
+  clearInterval(chatTimer);
+  screenTimer = setInterval(refreshViewer, mode === "term" && !live ? 1500 : 4000);
+  if (mode === "chat") chatTimer = setInterval(refreshChat, 2500);
 }
 
 function closeViewer() {
   stopLive();
   clearInterval(screenTimer);
+  clearInterval(chatTimer);
   current = null;
   $("viewer").hidden = true;
   refreshSessions();
 }
 $("v-back").onclick = closeViewer;
-$("v-more").onclick = () => ($("v-menu").hidden = !$("v-menu").hidden);
+$("v-more").onclick = () => { $("switcher").hidden = true; $("v-menu").hidden = !$("v-menu").hidden; };
+$("v-title").onclick = () => { $("v-menu").hidden = true; $("switcher").hidden = !$("switcher").hidden; };
+
+const STATUS_WORD = { working: "working…", needs_you: "waiting for you", done: "done", idle: "idle",
+                      frozen: "frozen", exited: "ended" };
 
 async function refreshViewer() {
   if (!current) return;
@@ -243,73 +268,164 @@ async function refreshViewer() {
   $("v-name").textContent = current;
   $("v-sub").textContent = s ? `${s.project} · ${age(s.age_seconds)} · ${mib(s.memory_current)}` : "";
 
-  // The switcher: every session as a chip, so you can hop between them without going back.
+  // Tapping the name lists every session, to hop between them without going back.
   $("switcher").replaceChildren(...sessions.map((x) => {
-    const chip = el("button", null, x.name === current ? "on" : "");
-    chip.append(el("span", null, `dot ${x.state}`), x.name);
-    chip.onclick = () => openViewer(x.name);
-    return chip;
+    const item = el("button", null, x.name === current ? "on" : "");
+    item.append(el("span", null, `dot ${x.state}`), x.name);
+    item.onclick = () => openViewer(x.name);
+    return item;
   }));
-  $("switcher").hidden = sessions.length < 2;
 
   let data;
   try { data = await api(`/api/sessions/${current}/screen?lines=300`); }
-  catch (error) { $("screen").textContent = error.message; return; }
+  catch (error) { if (mode === "term") $("screen").textContent = error.message; return; }
 
   $("v-dot").className = `dot ${data.state}`;
   $("frozen-note").hidden = !data.frozen;
   $("v-pause").hidden = data.frozen;
   showLaptopButton(data.windows);
+  showStatus(data.state);
   if (data.frozen) { stopLive(); return; }  // its tmux is paused too, so keep the last screen
 
-  if (!live && data.text !== lastText) {
+  if (mode === "term" && !live && data.text !== lastText) {
     const pre = $("screen");
     const atBottom = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 30;
-    renderAnsi(data.text, pre);
+    renderAnsi(trimLines(data.text), pre);
     if (atBottom || !lastText) pre.scrollTop = pre.scrollHeight;  // follow, unless you scrolled up to read
     lastText = data.text;
   }
-
-  // A menu on screen (permission, question, plan): show its choices as big buttons.
-  // Tapping one presses that number key, which is how Claude Code picks a numbered option.
-  const wasHidden = $("ask").hidden;
-  $("ask").hidden = data.state !== "needs_you";
-  // The card takes room from the screen above it, so keep the screen's last lines in view.
-  if (wasHidden && !$("ask").hidden) $("screen").scrollTop = $("screen").scrollHeight;
-  if (live && wasHidden !== $("ask").hidden) live.fit();
-  if (data.state === "needs_you") {
-    $("ask-question").textContent = data.question || "";
-    $("ask-options").replaceChildren(...data.options.map((o) => {
-      const button = el("button");
-      button.append(el("b", String(o.number)), el("span", o.label));
-      button.onclick = () => press(String(o.number));
-      return button;
-    }));
-  }
+  showQuestion(data);
 }
 
+// Claude pads its lines with spaces to the window's width; without them, only the lines that are
+// really wide (boxes, rules) need sideways scrolling. Colour codes at the end are kept.
+function trimLines(text) {
+  return text.split("\n").map((line) => line.replace(/[ \t]+((?:\x1b\[[0-9;]*m)*)$/, "$1")).join("\n");
+}
+
+function showStatus(state) {
+  const status = $("chat-status");
+  status.hidden = !STATUS_WORD[state];
+  status.replaceChildren(el("span", null, `dot ${state}`), STATUS_WORD[state] || "");
+}
+
+// A menu on screen (permission, question, plan) becomes a card with one button per choice: in the
+// chat after the last message, in Term above the keys. Tapping presses that number key.
+let lastQuestion = "";
+function showQuestion(data) {
+  const asking = data.state === "needs_you" && data.options && data.options.length;
+  const key = asking ? JSON.stringify([mode, data.question, data.options]) : "";
+  if (key === lastQuestion) return;
+  lastQuestion = key;
+  $("chat-ask").replaceChildren();
+  $("term-ask").replaceChildren();
+  if (!asking) return;
+  const card = el("div", null, "ask-card");
+  const options = el("div", null, "options");
+  options.append(...data.options.map((o) => {
+    const button = el("button");
+    button.append(el("b", String(o.number)), el("span", o.label));
+    button.onclick = () => press(String(o.number));
+    return button;
+  }));
+  card.append(el("span", "CLAUDE IS ASKING", "label"), el("span", data.question || "", "question"), options);
+  (mode === "chat" ? $("chat-ask") : $("term-ask")).append(card);
+  if (mode === "chat") scrollChatIfFollowing(true);
+}
+
+// ---- the chat ----------------------------------------------------------------------------------
+async function refreshChat(first) {
+  if (!current || mode !== "chat") return;
+  const name = current;
+  let data;
+  try { data = await api(`/api/sessions/${name}/conversation`); } catch (error) { return; }
+  if (current !== name || mode !== "chat") return;
+  if (data.claude === false) {
+    // A session running something else (bash) has no conversation: show its screen instead, once.
+    if (autoTerm !== name) { autoTerm = name; setMode("term"); return; }
+    $("chat-items").replaceChildren(el("div", "This session runs no Claude, so there is no chat. Its screen is under Term.", "chat-empty"));
+    return;
+  }
+  const key = JSON.stringify(data.items);
+  if (key === lastChat) return;
+  lastChat = key;
+  const following = isFollowing();
+  const open = new Set([...document.querySelectorAll("#chat-items details[open]")].map((d) => d.dataset.key));
+  $("chat-items").replaceChildren(...(data.items.length ? bubbles(data.items, open)
+    : [el("div", data.frozen ? "Frozen: resume it to read the chat." : "No messages yet.", "chat-empty")]));
+  if (first || following) scrollChatIfFollowing(true);
+}
+
+function isFollowing() {
+  const box = $("chat");
+  return box.scrollTop + box.clientHeight >= box.scrollHeight - 60;
+}
+function scrollChatIfFollowing(force) {
+  if (force || isFollowing()) $("chat").scrollTop = $("chat").scrollHeight;
+}
+
+// Messages as bubbles. Tool steps in a row fold into one grey line that opens on a tap.
+function bubbles(items, open) {
+  const out = [];
+  let steps = [];
+  const flush = () => {
+    if (!steps.length) return;
+    const group = document.createElement("details");
+    group.className = "steps";
+    group.dataset.key = `${out.length}:${steps[0]}`;
+    group.open = open.has(group.dataset.key);
+    group.append(el("summary", steps.length === 1 ? steps[0] : `${steps.length} steps · ${steps[steps.length - 1]}`));
+    if (steps.length > 1) group.append(...steps.map((s) => el("div", s)));
+    out.push(group);
+    steps = [];
+  };
+  for (const item of items) {
+    if (item.role === "tool") { steps.push(item.text); continue; }
+    flush();
+    out.push(bubble(item));
+  }
+  flush();
+  return out;
+}
+
+// A message's text, with ``` code blocks as monospace blocks. Always textContent, never HTML.
+function bubble(item) {
+  const box = el("div", null, `msg ${item.role}`);
+  item.text.split("```").forEach((part, i) => {
+    if (i % 2 === 1) box.append(el("pre", part.replace(/^[a-z0-9+-]*\n/, "")));
+    else if (part) box.append(part);
+  });
+  return box;
+}
+
+// ---- typing and keys ---------------------------------------------------------------------------
 async function press(key) {
   await api(`/api/sessions/${current}/send`, { key });
   setTimeout(refreshViewer, 250);
+  if (mode === "chat") setTimeout(refreshChat, 900);
 }
 
 $("composer").onsubmit = async (event) => {
   event.preventDefault();
+  stopListening();
   const text = $("reply").value;
   if (!text) { await press("Enter"); return; }  // an empty send is an Enter, like a terminal
   await api(`/api/sessions/${current}/send`, { text });
   $("reply").value = "";
   setTimeout(refreshViewer, 300);
+  if (mode === "chat") { setTimeout(refreshChat, 900); scrollChatIfFollowing(true); }
 };
 
-// The dock: Keys (a small keyboard for keys a phone lacks) and Quick (one-tap replies).
 const KEYS = [["Esc", "Escape"], ["Tab", "Tab"], ["⇧Tab", "BTab"], ["^C", "C-c"], ["↑", "Up"], ["↓", "Down"],
               ["←", "Left"], ["→", "Right"], ["⌫", "BSpace"], ["y", "y"], ["n", "n"], ["⏎", "Enter"]];
-$("panel-keys").replaceChildren(...KEYS.map(([label, key]) => {
-  const button = el("button", label);
-  button.onclick = () => press(key);
-  return button;
-}));
+const keyButton = ([label, key]) => { const b = el("button", label); b.type = "button"; b.onclick = () => press(key); return b; };
+$("keys-row").replaceChildren(...KEYS.map(keyButton));
+$("panel-keys").replaceChildren(...KEYS.map(keyButton));
+
+// ---- the + sheet: keys, quick replies, summary ---------------------------------------------------
+$("tools-open").onclick = () => { showSummary(); $("tools-sheet").hidden = false; };
+$("tools-close").onclick = () => ($("tools-sheet").hidden = true);
+$("tools-sheet").onclick = (event) => { if (event.target === $("tools-sheet")) $("tools-sheet").hidden = true; };
 
 // Commands that throw work away need a second tap within 3 seconds.
 const QUICK = [["continue", false], ["yes", false], ["no", false], ["/compact", false], ["/clear", true]];
@@ -325,23 +441,15 @@ $("panel-quick").replaceChildren(...QUICK.map(([text, destructive]) => {
     button.classList.remove("armed");
     button.textContent = text;
     await api(`/api/sessions/${current}/send`, { text });
+    $("tools-sheet").hidden = true;
     setTimeout(refreshViewer, 300);
+    if (mode === "chat") setTimeout(refreshChat, 900);
   };
   return button;
 }));
 
-for (const tab of document.querySelectorAll(".dock-tabs button")) {
-  tab.onclick = () => {
-    const open = !tab.classList.contains("on");
-    for (const t of document.querySelectorAll(".dock-tabs button")) t.classList.remove("on");
-    for (const panel of ["keys", "quick", "summary"]) $(`panel-${panel}`).hidden = !(open && tab.dataset.panel === panel);
-    if (open && tab.dataset.panel === "summary") showSummary();
-    if (open) tab.classList.add("on");
-  };
-}
-
-// Summary (docs/decisions/0019): Haiku reads the end of the screen and answers in three lines.
-// Only the button spends tokens; opening the tab shows the last summary of this session, if any.
+// Summary (docs/decisions/0019): Haiku reads the end of the screen and answers in a few lines.
+// Only the button spends tokens; opening the sheet shows the last summary of this session, if any.
 const summaries = {};  // session name -> { text, model, input_tokens, output_tokens, seconds, at }
 
 function showSummary() {
@@ -367,9 +475,63 @@ $("summary-go").onclick = async () => {
   }
 };
 
-// The laptop button: "Open on laptop" when no terminal window shows this session, "Close on laptop"
-// when one does. Closing detaches the windows; the session keeps running. Hidden while frozen,
-// because a paused tmux cannot say how many windows it has (windows is then null).
+// ---- voice: speak a message into the box (docs/decisions/0020) ---------------------------------
+// The browser turns speech into text (Chrome does it with Google's speech service). The words land
+// in the box to be read and sent with ➤; nothing is sent by voice alone. Browsers only allow the
+// microphone on https:// pages (and on the laptop itself), so over plain http it explains instead.
+const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+let listener = null;
+
+function stopListening() {
+  if (listener) listener.stop();
+}
+
+$("mic").onclick = () => {
+  if (listener) { stopListening(); return; }
+  if (!window.isSecureContext) {
+    alert("Voice needs the page on https://, which is not switched on yet. Until then, use the microphone key on your phone's keyboard.");
+    return;
+  }
+  if (!Recognition) { alert("This browser cannot turn speech into text. Use the microphone key on your phone's keyboard."); return; }
+  const before = $("reply").value ? $("reply").value.trimEnd() + " " : "";
+  listener = new Recognition();
+  listener.lang = navigator.language || "en-US";
+  listener.interimResults = true;  // words appear while you speak
+  listener.onresult = (event) => {
+    $("reply").value = before + [...event.results].map((r) => r[0].transcript).join("");
+  };
+  listener.onerror = (event) => {
+    if (event.error === "not-allowed") alert("The microphone is blocked for this page. Allow it in the browser's site settings.");
+  };
+  listener.onend = () => { listener = null; $("mic").classList.remove("on"); };
+  listener.start();
+  $("mic").classList.add("on");
+};
+
+// ---- fitting above the phone keyboard ----------------------------------------------------------
+// The viewport setting asks the browser to shrink the page when the keyboard opens; where a browser
+// does not, the visible area (visualViewport) is followed by hand. With the keyboard open, a
+// question shrinks to its buttons (style.css, body.kb-open).
+let tallest = 0;
+function fitToKeyboard() {
+  const view = window.visualViewport;
+  if (!view) return;
+  tallest = Math.max(tallest, view.height);
+  $("viewer").style.height = `${view.height}px`;
+  $("viewer").style.top = `${view.offsetTop}px`;
+  document.body.classList.toggle("kb-open", view.height < tallest - 150);
+  if (!$("viewer").hidden && mode === "chat") scrollChatIfFollowing();
+}
+if (window.visualViewport) {
+  window.visualViewport.addEventListener("resize", fitToKeyboard);
+  window.visualViewport.addEventListener("scroll", fitToKeyboard);
+  window.addEventListener("orientationchange", () => { tallest = 0; });
+  fitToKeyboard();
+}
+
+// The laptop item in ⋯: "Open on laptop" when no terminal window shows this session, "Close on
+// laptop" when one does. Closing detaches the windows; the session keeps running. Hidden while
+// frozen, because a paused tmux cannot say how many windows it has (windows is then null).
 function showLaptopButton(windows) {
   const button = $("v-laptop");
   button.hidden = windows === null || windows === undefined;
@@ -379,14 +541,13 @@ function showLaptopButton(windows) {
 
 $("v-laptop").onclick = async () => {
   const button = $("v-laptop");
-  button.disabled = true;
+  $("v-menu").hidden = true;
   try {
     const action = button.dataset.open ? "desktop/close" : "desktop";
     await api(`/api/sessions/${current}/${action}`, {});
   } catch (error) {
     alert(error.message);  // e.g. no desktop is running on the laptop
   } finally {
-    button.disabled = false;
     setTimeout(refreshViewer, 700);  // the window needs a moment to attach or close
   }
 };

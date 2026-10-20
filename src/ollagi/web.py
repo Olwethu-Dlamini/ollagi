@@ -310,10 +310,13 @@ def create_app(config: Config, machine=None, sessions_api=sessions, run_watcher=
         if sessions_api.scope_state(name)[0]:
             # A frozen session's tmux cannot say which process it runs.
             return {"claude": None, "frozen": True, "title": None, "items": []}
-        session_id = outside_api.session_id_of(sessions_api.info(name).pane_pid)
-        path = outside_api.transcript_path(session_id) if session_id else None
-        if path is None:
-            return {"claude": False, "frozen": False, "title": None, "items": []}
+        pid = sessions_api.info(name).pane_pid
+        session_id = outside_api.session_id_of(pid)
+        if session_id is None:  # not a Claude (bash, say), or one that has not written its file yet
+            return {"claude": outside_api.is_claude(pid), "frozen": False, "title": None, "items": []}
+        path = outside_api.transcript_path(session_id)
+        if path is None:  # a Claude that has not been told anything yet: its file comes with the first message
+            return {"claude": True, "frozen": False, "title": None, "items": []}
         title, items = outside_api.parse_conversation(outside_api.read_tail(path), limit=80)
         return {"claude": True, "frozen": False, "title": title,
                 "items": [{"role": i.role, "text": i.text[:6000]} for i in items]}

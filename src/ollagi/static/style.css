@@ -105,50 +105,101 @@ td:last-child { text-align: right; font-family: var(--mono); }
 .plain { padding: 12px 16px; border-radius: 10px; border: 1px solid var(--line); background: transparent; }
 .error { color: var(--needs); white-space: pre-wrap; font-size: 14px; }
 
-/* ---- one session, full screen --------------------------------------------------------------- */
-#viewer { position: fixed; inset: 0; z-index: 6; display: flex; flex-direction: column; background: var(--bg); }
-.v-head { display: flex; align-items: center; gap: 10px; padding: calc(10px + env(safe-area-inset-top)) 12px 10px; border-bottom: 1px solid var(--line); }
-.v-head .title { min-width: 0; flex: 1; }
-.v-head .title strong { display: block; font: 700 16px var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.v-head .title span { font-size: 12px; color: var(--muted); font-family: var(--mono); }
-.switcher { display: flex; gap: 6px; overflow-x: auto; padding: 8px 12px; border-bottom: 1px solid var(--line); scrollbar-width: none; }
-.switcher button { flex: none; display: inline-flex; align-items: center; gap: 7px; padding: 6px 12px; border-radius: 8px;
-                   border: 1px solid var(--line); background: var(--surface); font: 13px var(--mono); }
-.switcher button.on { border-color: var(--text); }
-#screen { flex: 1; margin: 0; padding: 10px 12px; overflow: auto; background: var(--screen-bg); color: var(--screen-text);
-          font: 12px/1.4 var(--mono); white-space: pre-wrap; word-break: break-word; }
+/* ---- one session, full screen: a chat, like a messaging app (docs/decisions/0020) ----------- */
+/* The height follows the space above the phone keyboard (app.js fitToKeyboard). */
+#viewer { position: fixed; top: 0; left: 0; right: 0; height: 100dvh; z-index: 6; display: flex; flex-direction: column;
+          background: var(--bg); }
+.v-head { display: flex; align-items: center; gap: 8px; padding: calc(8px + env(safe-area-inset-top)) 10px 8px;
+          border-bottom: 1px solid var(--line); background: var(--surface); }
+.v-title { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; border: 0; background: transparent;
+           text-align: left; padding: 4px 2px; }
+.v-title .title { min-width: 0; display: grid; }
+.v-title strong { font: 700 15px var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.v-title .title span { font: 11px var(--mono); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.seg { display: flex; flex: none; background: var(--raised); border-radius: 9px; padding: 2px; }
+.seg button { border: 0; background: transparent; padding: 6px 11px; border-radius: 7px; font: 600 13px var(--mono); color: var(--muted); }
+.seg button.on { background: var(--surface); color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,.18); }
+.menu { position: absolute; right: 10px; top: calc(54px + env(safe-area-inset-top)); z-index: 7; display: grid; min-width: 180px;
+        max-height: 60vh; overflow: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
+        box-shadow: 0 10px 30px rgba(0,0,0,.35); }
+.menu button { display: flex; align-items: center; gap: 8px; padding: 12px 14px; border: 0; border-bottom: 1px solid var(--line);
+               background: transparent; text-align: left; }
+.menu button:last-child { border-bottom: 0; }
+#v-menu button:last-child { color: var(--needs); }
+.menu.switcher { left: 48px; right: auto; font-family: var(--mono); }
+.menu.switcher button.on { font-weight: 700; }
+.notice { padding: 12px 14px; border-bottom: 1px solid var(--line); background: var(--surface); display: flex; gap: 12px; align-items: center; }
+
+/* Chat: Claude on the left, me on the right, tool steps as small grey lines. */
+.chat { flex: 1; min-height: 0; overflow-y: auto; padding: 12px 12px 8px; background: var(--bg); }
+#chat-items, #chat-ask { display: flex; flex-direction: column; gap: 8px; }
+#chat-ask:not(:empty) { margin-top: 8px; }
+.msg { max-width: 86%; padding: 9px 12px; border-radius: 16px; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.4; }
+.msg.claude { align-self: flex-start; background: var(--surface); border: 1px solid var(--line); border-bottom-left-radius: 5px; }
+.msg.you { align-self: flex-end; background: var(--accent); color: #fff; border-bottom-right-radius: 5px; }
+.msg pre { margin: 6px 0; padding: 8px; border-radius: 8px; background: var(--screen-bg); color: var(--screen-text);
+           font: 12px/1.4 var(--mono); white-space: pre; overflow-x: auto; }
+.msg.event { align-self: center; background: transparent; color: var(--muted); font-size: 12px; padding: 2px; }
+.steps { align-self: flex-start; max-width: 92%; font: 12px/1.5 var(--mono); color: var(--muted); }
+.steps summary { list-style: none; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 2px 4px; }
+.steps summary::-webkit-details-marker { display: none; }
+.steps summary::before { content: "▸ "; }
+.steps[open] summary::before { content: "▾ "; }
+.steps div { padding: 1px 0 1px 18px; overflow-wrap: anywhere; }
+.chat-status { display: flex; align-items: center; gap: 7px; margin-top: 10px; font: 12px var(--mono); color: var(--muted); }
+.chat-empty { text-align: center; color: var(--muted); padding: 32px 16px; }
+.ask-card { border: 1px solid color-mix(in srgb, var(--needs) 45%, var(--line)); background: var(--surface); border-radius: 14px;
+            padding: 10px 12px; display: grid; gap: 8px; }
+.ask-card .label { font: 600 11px var(--mono); letter-spacing: 1px; color: var(--needs); }
+.ask-card .question { font-weight: 600; }
+.ask-card .options { display: flex; flex-wrap: wrap; gap: 6px; }
+.ask-card .options button { display: inline-flex; gap: 8px; align-items: center; max-width: 100%; padding: 8px 12px; text-align: left;
+                            border-radius: 10px; border: 1px solid var(--line); background: var(--raised); }
+.ask-card .options b { font: 12px var(--mono); color: var(--muted); }
+/* With the keyboard open, a question shrinks to its buttons in one row. */
+body.kb-open .ask-card .question { display: none; }
+body.kb-open .ask-card .options { flex-wrap: nowrap; overflow-x: auto; }
+body.kb-open .ask-card .options button { flex: none; }
+
+/* Term: the screen as Claude drew it. No wrapping: a wrapped line breaks boxes and columns apart,
+   so every line stays as drawn, left-aligned, and a wide one scrolls sideways. */
+.term { flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--screen-bg); }
+.term-bar { display: flex; align-items: center; gap: 10px; padding: 6px 10px; border-bottom: 1px solid #26262b; }
+.term-bar .hint { font: 11px var(--mono); color: #8b8b95; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.term-bar .icon-button { background: #1c1c1f; border-color: #33333a; color: var(--screen-text); padding: 5px 12px; }
+.term-bar #v-live.on { background: var(--screen-text); border-color: var(--screen-text); color: var(--screen-bg); }
+#screen { flex: 1; min-height: 0; margin: 0; padding: 8px 10px; overflow: auto; color: var(--screen-text); text-align: left;
+          font: 12px/1.35 var(--mono); white-space: pre; }
 /* The live terminal: xterm.js draws inside #live and needs a box with a real size to fit to. */
-#live { flex: 1; min-height: 0; padding: 6px 4px 0 8px; background: var(--screen-bg); }
+#live { flex: 1; min-height: 0; padding: 4px 0 0 6px; text-align: left; }
 #live .xterm { height: 100%; }
-#v-live.on { border-color: var(--text); background: var(--text); color: var(--bg); }
-.notice { padding: 14px; border-bottom: 1px solid var(--line); background: var(--surface); display: flex; gap: 12px; align-items: center; }
-.ask { border-top: 1px solid var(--line); background: var(--surface); padding: 12px; display: grid; gap: 8px; max-height: 46vh; overflow: auto; }
-.ask .label { font: 600 11px var(--mono); letter-spacing: 1px; color: var(--needs); }
-.ask .question { font-weight: 600; }
-.ask button { display: grid; grid-template-columns: 30px 1fr; gap: 10px; align-items: center; text-align: left; padding: 12px;
-              border-radius: 10px; border: 1px solid var(--line); background: var(--raised); }
-.ask button b { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 6px; background: var(--bg); font: 13px var(--mono); }
-.dock { border-top: 1px solid var(--line); background: var(--surface); padding: 8px 10px calc(8px + env(safe-area-inset-bottom)); display: grid; gap: 8px; }
-.dock-tabs { display: flex; gap: 6px; }
-.dock-tabs button { padding: 7px 12px; border-radius: 8px; border: 0; background: transparent; color: var(--muted); font: 600 13px var(--mono); }
-.dock-tabs button.on { background: var(--raised); color: var(--text); }
-.dock-tabs .spacer { margin-left: auto; }
+#term-ask:not(:empty) { padding: 8px; background: var(--bg); }
+
+/* The composer: + (keys, quick replies, summary), the message with its microphone, send. */
+.composer-bar { border-top: 1px solid var(--line); background: var(--surface); display: grid; gap: 6px;
+                padding: 6px 8px calc(6px + env(safe-area-inset-bottom)); }
+.keys-row { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; }
+.keys-row button { flex: none; min-width: 42px; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line);
+                   background: var(--raised); font: 13px var(--mono); }
+.composer { display: grid; grid-template-columns: 40px 1fr 44px; gap: 6px; align-items: center; }
+.round { width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--line); background: var(--raised); font-size: 22px; line-height: 1; }
+.field { display: flex; align-items: center; min-width: 0; border: 1px solid var(--line); border-radius: 22px; background: var(--bg); padding-right: 3px; }
+.field input { flex: 1; min-width: 0; border: 0; background: transparent; padding: 10px 14px; outline: none; font-size: 16px; }
+.mic { width: 36px; height: 36px; flex: none; border-radius: 50%; border: 0; background: transparent; font-size: 17px; }
+.mic.on { background: var(--needs); box-shadow: 0 0 0 0 var(--needs); animation: pulse 1.6s infinite; }
+.send { width: 44px; height: 44px; border-radius: 50%; border: 0; background: var(--accent); color: #fff; font-size: 18px; }
+
+/* The + sheet. */
+.sheet.tools { max-height: 85dvh; overflow-y: auto; }
+.sheet.tools h2 { margin-top: 6px; font: 600 12px var(--mono); letter-spacing: 1px; text-transform: uppercase; color: var(--muted); }
 .pad { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; }
 .pad button { padding: 11px 0; border-radius: 8px; border: 1px solid var(--line); background: var(--raised); font: 13px var(--mono); }
-.pad .wide { grid-column: span 2; }
-.summary { display: grid; gap: 8px; }
-.summary-text { white-space: pre-wrap; font-size: 14px; line-height: 1.45; max-height: 30vh; overflow: auto; }
-.summary-meta { font: 12px var(--mono); color: var(--muted); }
 .quick { display: flex; flex-wrap: wrap; gap: 6px; }
 .quick button { padding: 9px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--raised); font: 13px var(--mono); }
 .quick button.armed { border-color: var(--needs); color: var(--needs); }
-.composer { display: grid; grid-template-columns: 1fr 46px; gap: 8px; }
-.composer input { padding: 12px 14px; border-radius: 12px; border: 1px solid var(--line); background: var(--bg); font-family: var(--mono); }
-.send { width: 46px; height: 46px; border-radius: 50%; border: 0; background: var(--text); color: var(--bg); font-size: 18px; }
-.menu { position: absolute; right: 12px; top: calc(56px + env(safe-area-inset-top)); z-index: 7; display: grid; min-width: 170px;
-        background: var(--surface); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,.4); }
-.menu button { padding: 12px 14px; border: 0; border-bottom: 1px solid var(--line); background: transparent; text-align: left; }
-.menu button:last-child { border-bottom: 0; color: var(--needs); }
+.sum-panel { display: grid; gap: 8px; }
+.summary-text { white-space: pre-wrap; font-size: 14px; line-height: 1.45; }
+.summary-meta { font: 12px var(--mono); color: var(--muted); }
 
 /* ---- queue -------------------------------------------------------------------------------- */
 textarea { width: 100%; padding: 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg);

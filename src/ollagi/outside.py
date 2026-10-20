@@ -125,6 +125,15 @@ def session_id_of(pid: int, claude_home: Path = CLAUDE_HOME, proc: Path = Path("
     return str(data.get("sessionId") or "") or None
 
 
+def is_claude(pid: int, proc: Path = Path("/proc")) -> bool:
+    """True when the process is Claude Code, by its name. Claude writes its session file only once
+    its first question ("trust this folder?") is answered; the name is there from the start."""
+    try:
+        return (proc / str(pid) / "comm").read_text().strip() == "claude"
+    except OSError:
+        return False
+
+
 def transcript_path(session_id: str, claude_home: Path = CLAUDE_HOME) -> Path | None:
     if not session_id or "/" in session_id:
         return None
