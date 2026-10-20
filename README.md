@@ -68,6 +68,7 @@ start another? yes: 1 more can start
 ## How to read this repo
 
 - `docs/decisions/`: one short note per choice: what was decided, why, and what else was considered. Read these first.
+- `docs/suggestions.md`: ideas not decided yet, with what each would change and how to undo it.
 - `docs/learning/`: the concepts the code relies on (tmux, Tailscale, `/proc/meminfo`, systemd), explained in plain words.
 - `src/ollagi/`: the code. Each module does one job.
 - `tests/`: how each job is checked.
