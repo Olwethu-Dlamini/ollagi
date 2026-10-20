@@ -143,12 +143,6 @@ class FakeOutside:
         self.ended.append(pid)
         return True
 
-    def session_id_of(self, pid):
-        return {4242: "conv-1"}.get(pid)  # FakeSessions' "demo" runs Claude as pid 4242
-
-    def is_claude(self, pid):
-        return pid in (4242, 4343)  # 4343: a Claude that has not written its session file yet
-
 
 class FakeWindows:
     """Stands in for desktop.Laptop: remembers which sessions got a window on the laptop."""
@@ -603,43 +597,3 @@ def test_a_failed_summary_says_why(fake_sessions):
     response = c.post("/api/sessions/demo/summary", headers=CHANGE)
     assert response.status_code == 502
     assert "usage limit" in response.json()["detail"]
-
-
-
-# The chat view (docs/decisions/0020) reads the session's conversation from Claude's own files.
-
-def test_a_sessions_conversation_is_read_from_claudes_files(fake_sessions):
-    data = client(fake_sessions).get("/api/sessions/demo/conversation").json()
-    assert data["claude"] is True
-    assert data["items"] == [{"role": "you", "text": "hello"}]
-
-
-def test_a_session_without_claude_has_no_conversation(fake_sessions):
-    fake_sessions.running["shell"] = "/tmp"
-    fake_sessions.info = lambda name: SessionInfo(name, "/tmp", 777, 1_000_000, True, MIB, MIB)
-    data = client(fake_sessions).get("/api/sessions/shell/conversation").json()
-    assert data == {"claude": False, "frozen": False, "title": None, "items": []}
-
-
-def test_a_frozen_sessions_conversation_is_not_looked_up(fake_sessions):
-    fake_sessions.frozen.add("demo")
-    data = client(fake_sessions).get("/api/sessions/demo/conversation").json()
-    assert data["frozen"] is True and data["items"] == []
-
-
-def test_no_conversation_for_an_unknown_session(fake_sessions):
-    assert client(fake_sessions).get("/api/sessions/nope/conversation").status_code == 404
-
-
-def test_a_new_claude_with_nothing_said_yet_is_still_a_claude(fake_sessions):
-    outside = FakeOutside()
-    outside.transcript_path = lambda session_id: None  # Claude writes the file with the first message
-    data = client(fake_sessions, outside_api=outside).get("/api/sessions/demo/conversation").json()
-    assert data == {"claude": True, "frozen": False, "title": None, "items": []}
-
-
-def test_a_claude_still_at_its_first_question_is_a_claude(fake_sessions):
-    # Before the "trust this folder?" question is answered, Claude has written no session file.
-    fake_sessions.info = lambda name: SessionInfo(name, "/tmp", 4343, 1_000_000, True, MIB, MIB)
-    data = client(fake_sessions).get("/api/sessions/demo/conversation").json()
-    assert data == {"claude": True, "frozen": False, "title": None, "items": []}

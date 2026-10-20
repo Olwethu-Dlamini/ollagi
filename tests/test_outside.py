@@ -3,7 +3,7 @@
 import json
 import os
 
-from ollagi.outside import list_sessions, parse_conversation, process_start, is_claude, read_tail, session_id_of, transcript_path
+from ollagi.outside import list_sessions, parse_conversation, process_start, read_tail, transcript_path
 
 
 def entry(**fields):
@@ -101,22 +101,3 @@ def test_a_conversation_file_is_found_by_its_id_in_any_project_folder(tmp_path):
     assert transcript_path("abc-123", claude_home=tmp_path) == folder / "abc-123.jsonl"
     assert transcript_path("../etc", claude_home=tmp_path) is None
 
-
-def test_a_running_claudes_conversation_id_is_found_from_its_process(tmp_path):
-    me = os.getpid()
-    (tmp_path / "sessions").mkdir()
-    (tmp_path / "sessions" / f"{me}.json").write_text(json.dumps({
-        "pid": me, "sessionId": "conv-9", "kind": "interactive", "procStart": process_start(me)}))
-    assert session_id_of(me, claude_home=tmp_path) == "conv-9"
-    # No file (not a Claude, e.g. bash), or a file left by an earlier process with the same pid.
-    assert session_id_of(1, claude_home=tmp_path) is None
-    (tmp_path / "sessions" / "1.json").write_text(json.dumps({"pid": 1, "sessionId": "old", "procStart": "nope"}))
-    assert session_id_of(1, claude_home=tmp_path) is None
-
-
-def test_a_claude_process_is_known_by_its_name(tmp_path):
-    (tmp_path / "5").mkdir()
-    (tmp_path / "5" / "comm").write_text("claude\n")
-    (tmp_path / "6").mkdir()
-    (tmp_path / "6" / "comm").write_text("bash\n")
-    assert is_claude(5, proc=tmp_path) and not is_claude(6, proc=tmp_path) and not is_claude(7, proc=tmp_path)
