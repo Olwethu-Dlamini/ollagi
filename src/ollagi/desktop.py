@@ -7,6 +7,10 @@ Closing the window detaches: the session keeps running.
 The window is started through `uwsm app --` when uwsm is installed (it is on omarchy). That makes
 the window its own systemd unit, so restarting ollagi's service does not close it. Without uwsm the
 terminal is started directly, in its own process session.
+
+The page can also show a session as a live terminal in the browser (docs/decisions/0018). That is a
+tmux client too, but it is not a window on the laptop, so it must not be counted or closed here.
+Its process carries OLLAGI_VIEWER=browser in its environment, which is how it is told apart.
 """
 
 import os
@@ -14,10 +18,12 @@ import shutil
 import subprocess
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 
 from ollagi import sessions
 
 DEFAULT_TERMINAL = ("foot", "-T", "ollagi: {name}")
+BROWSER_MARK = b"OLLAGI_VIEWER=browser"  # in the environment of a browser terminal's tmux client
 
 
 @dataclass(frozen=True)
@@ -58,22 +64,49 @@ def open_window(name: str, settings: Settings, environ: Mapping[str, str] | None
     return True
 
 
-def count_windows(name: str, run: sessions.Run = sessions.run_command) -> int:
-    """How many terminals show the session now. The web page reads the screen without attaching,
-    so only windows (and terminals attached by hand) count."""
-    result = run(sessions.tmux(sessions.check_name(name), "list-clients", "-F", "#{client_tty}"))
+def read_environ(pid: int) -> bytes:
+    """A process's environment as the kernel keeps it: NAME=value entries separated by NUL bytes."""
+    return Path(f"/proc/{pid}/environ").read_bytes()
+
+
+def in_browser(pid: int, read: Callable[[int], bytes] = read_environ) -> bool:
+    try:
+        return BROWSER_MARK in read(pid).split(b"\0")
+    except OSError:
+        return False  # gone or unreadable: treat it as a window, the old behaviour
+
+
+def laptop_windows(name: str, run: sessions.Run = sessions.run_command,
+                   read_environ: Callable[[int], bytes] = read_environ) -> list[str]:
+    """The terminals (ttys) showing the session on the laptop. The page's plain screen view reads
+    the screen without attaching, and a live terminal in the browser is left out, so only windows
+    (and terminals attached by hand) are listed."""
+    result = run(sessions.tmux(sessions.check_name(name), "list-clients", "-F", "#{client_tty} #{client_pid}"))
     if result.returncode != 0:
-        return 0
-    return len([line for line in result.stdout.splitlines() if line.strip()])
+        return []
+    windows = []
+    for line in result.stdout.splitlines():
+        tty, _, pid = line.strip().rpartition(" ")
+        if tty and pid.isdigit() and not in_browser(int(pid), read_environ):
+            windows.append(tty)
+    return windows
 
 
-def close_windows(name: str, run: sessions.Run = sessions.run_command) -> int:
-    """Close the session's windows by detaching their tmux clients: each window's program ends, so
-    the window closes, while the session itself keeps running. Returns how many were closed."""
-    open_now = count_windows(name, run=run)
-    if open_now:
-        run(sessions.tmux(name, "detach-client", "-s", sessions.WINDOW))
-    return open_now
+def count_windows(name: str, run: sessions.Run = sessions.run_command,
+                  read_environ: Callable[[int], bytes] = read_environ) -> int:
+    """How many windows show the session on the laptop now."""
+    return len(laptop_windows(name, run=run, read_environ=read_environ))
+
+
+def close_windows(name: str, run: sessions.Run = sessions.run_command,
+                  read_environ: Callable[[int], bytes] = read_environ) -> int:
+    """Close the session's windows by detaching their tmux clients one by one: each window's
+    program ends, so the window closes, while the session itself keeps running. A live terminal in
+    the browser stays open. Returns how many were closed."""
+    windows = laptop_windows(name, run=run, read_environ=read_environ)
+    for tty in windows:
+        run(sessions.tmux(name, "detach-client", "-t", tty))
+    return len(windows)
 
 
 class Laptop:

@@ -109,38 +109,64 @@ def test_ollagi_open_shows_a_running_session_and_says_why_it_cannot(monkeypatch,
 
 
 class FakeRun:
-    """Answers tmux like a session with the given terminals attached, and records the commands."""
+    """Answers tmux like a session with the given terminals attached, and records the commands.
+    `terminals` maps each client's tty to its process id."""
 
-    def __init__(self, terminals=("/dev/pts/3",), returncode=0):
+    def __init__(self, terminals=None, returncode=0):
         self.calls = []
-        self.terminals = terminals
+        self.terminals = {"/dev/pts/3": 501} if terminals is None else terminals
         self.returncode = returncode
 
     def __call__(self, argv):
         import subprocess
 
         self.calls.append(list(argv))
-        return subprocess.CompletedProcess(argv, self.returncode, "".join(t + "\n" for t in self.terminals), "")
+        out = "".join(f"{tty} {pid}\n" for tty, pid in self.terminals.items())
+        return subprocess.CompletedProcess(argv, self.returncode, out, "")
+
+
+def environ_of(browser_pids=()):
+    """Reads a fake /proc/<pid>/environ: browser terminals carry ollagi's mark (decision 0018)."""
+    def read(pid):
+        if pid in browser_pids:
+            return b"TERM=xterm-256color\0OLLAGI_VIEWER=browser\0"
+        return b"TERM=foot\0HOME=/home/me\0"
+    return read
 
 
 def test_windows_are_counted_from_the_terminals_attached_to_the_session():
-    run = FakeRun(terminals=("/dev/pts/3", "/dev/pts/7"))
-    assert desktop.count_windows("calendar", run=run) == 2
-    assert run.calls == [["tmux", "-L", "ollagi-calendar", "list-clients", "-F", "#{client_tty}"]]
-    assert desktop.count_windows("calendar", run=FakeRun(terminals=())) == 0
+    run = FakeRun(terminals={"/dev/pts/3": 501, "/dev/pts/7": 502})
+    assert desktop.count_windows("calendar", run=run, read_environ=environ_of()) == 2
+    assert run.calls == [["tmux", "-L", "ollagi-calendar", "list-clients", "-F", "#{client_tty} #{client_pid}"]]
+    assert desktop.count_windows("calendar", run=FakeRun(terminals={})) == 0
     # A session whose tmux is gone has no windows, not an error.
     assert desktop.count_windows("calendar", run=FakeRun(returncode=1)) == 0
 
 
-def test_closing_detaches_every_terminal_and_leaves_the_session_running():
-    run = FakeRun(terminals=("/dev/pts/3", "/dev/pts/7"))
-    assert desktop.close_windows("calendar", run=run) == 2
-    assert run.calls[-1] == ["tmux", "-L", "ollagi-calendar", "detach-client", "-s", "main"]
+def test_a_live_terminal_in_the_browser_is_not_a_window_on_the_laptop():
+    run = FakeRun(terminals={"/dev/pts/3": 501, "/dev/pts/9": 900})
+    assert desktop.count_windows("calendar", run=run, read_environ=environ_of(browser_pids={900})) == 1
+
+
+def test_a_client_whose_environment_cannot_be_read_counts_as_a_window():
+    def unreadable(pid):
+        raise PermissionError(pid)
+    assert desktop.count_windows("calendar", run=FakeRun(), read_environ=unreadable) == 1
+
+
+def test_closing_detaches_the_laptop_windows_only_and_leaves_the_session_running():
+    run = FakeRun(terminals={"/dev/pts/3": 501, "/dev/pts/7": 502, "/dev/pts/9": 900})
+    assert desktop.close_windows("calendar", run=run, read_environ=environ_of(browser_pids={900})) == 2
+    detached = [call for call in run.calls if "detach-client" in call]
+    assert detached == [
+        ["tmux", "-L", "ollagi-calendar", "detach-client", "-t", "/dev/pts/3"],
+        ["tmux", "-L", "ollagi-calendar", "detach-client", "-t", "/dev/pts/7"],
+    ]
     assert not any("kill" in word for call in run.calls for word in call)
 
 
 def test_closing_with_no_window_open_does_nothing():
-    run = FakeRun(terminals=())
+    run = FakeRun(terminals={})
     assert desktop.close_windows("calendar", run=run) == 0
     assert all("detach-client" not in call for call in run.calls)
 
