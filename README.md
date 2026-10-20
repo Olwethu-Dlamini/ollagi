@@ -30,6 +30,7 @@ Early. Built in small steps, one idea per commit, so every part can be read and 
 | 7 | Projects from a config file | done |
 | 8 | `claude` in a terminal starts through ollagi (`ollagi here`) | done |
 | 8b | See sessions started in a terminal, take an idle one over | done |
+| 8c | A session as a window on the laptop: opens on start, open/close button, `ollagi open/close` | done |
 
 ## Try it
 

@@ -124,3 +124,13 @@ same moment can break it, so every database method in `queue.py` takes a lock fi
 - A shell function with the same name as a command runs instead of it. Inside the function,
   `command claude` means "the real claude, not this function", which is how the wrapper passes
   everything that is not an interactive chat straight through.
+
+## tmux clients: many windows, one session (decision 0017)
+
+- A tmux server keeps the programs running; a client is a terminal attached to it. Every window
+  that shows a session runs its own small `tmux attach`, which is a client. `tmux list-clients`
+  lists them, so counting them says how many windows show the session.
+- `tmux detach-client -s main` detaches every client of the session. Each window's program then
+  ends, so the window closes, while the server and Claude inside it keep running.
+- `uwsm app -- foot ...` starts foot as its own systemd unit, so it belongs to the desktop, not to
+  whichever program asked for it.
