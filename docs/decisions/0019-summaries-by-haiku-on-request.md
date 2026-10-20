@@ -16,7 +16,8 @@ Chosen together with an installable app and phone notifications (to follow; both
 - The session view gets a **Summary** tab. Opening it costs nothing. Its **Summarise** button sends
   the last 150 lines of the screen (at most 12,000 characters) to `claude -p` with the Haiku model
   and shows the answer with the tokens it took. The prompt asks for at most three short lines, the
-  last starting with "Next:"; Haiku sometimes writes two longer paragraphs instead. Never on a timer, never for every session at once.
+  last starting with "Next:"; Haiku sometimes writes two longer paragraphs instead. Never on a
+  timer, never for every session at once.
 - It runs through the Claude Code CLI on my Claude plan, so it counts toward the plan's limits and
   needs no API key of its own.
 - The call is kept small and harmless:
