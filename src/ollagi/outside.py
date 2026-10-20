@@ -18,6 +18,7 @@ idle session can be taken over, so no work in progress is cut off.
 
 import json
 import os
+import re
 import signal
 import time
 from dataclasses import dataclass
@@ -40,8 +41,39 @@ class OutsideSession:
 
 @dataclass(frozen=True)
 class Item:
-    role: str  # "you", "claude" or "tool"
+    role: str  # "you", "claude", "tool" or "event"
     text: str
+
+
+def _tag(name: str, text: str) -> str | None:
+    """The text inside <name>...</name>, or None when the tag is not there."""
+    found = re.search(rf"<{name}>(.*?)</{name}>", text, re.DOTALL)
+    return found.group(1).strip() if found else None
+
+
+def _first_line(text: str, limit: int = 160) -> str:
+    return text.strip().splitlines()[0][:limit] if text.strip() else ""
+
+
+def user_item(text: str) -> Item | None:
+    """A typed line as a person would read it. Claude Code also stores its own bookkeeping as
+    "user" lines wrapped in tags: a slash command, a `!` shell line and their output, background
+    task notices. Those become short lines; notices nobody typed are left out."""
+    text = text.strip()
+    if text.startswith("<task-notification>"):
+        return None
+    command = _tag("command-name", text)
+    if command is not None:
+        return Item("you", f"{command} {_tag('command-args', text) or ''}".strip())
+    shell = _tag("bash-input", text)
+    if shell is not None:
+        return Item("you", f"! {shell}")
+    for output in ("local-command-stdout", "bash-stdout"):
+        printed = _tag(output, text)
+        if printed is not None:
+            return Item("tool", _first_line(printed)) if printed else None
+    text = re.sub(r"<pasted_content[^>]*>.*?</pasted_content[^>]*>", "[pasted text]", text, flags=re.DOTALL)
+    return Item("you", text) if text else None
 
 
 def process_start(pid: int, proc: Path = Path("/proc")) -> str | None:
@@ -107,10 +139,18 @@ def parse_conversation(lines: list[str], limit: int = 40) -> tuple[str | None, l
             title = entry["aiTitle"]
         if entry.get("isSidechain"):  # a subagent's own conversation
             continue
+        if entry.get("isMeta"):  # context Claude Code adds by itself, never typed
+            continue
         message = entry.get("message") or {}
         content = message.get("content")
         if entry.get("type") == "user" and isinstance(content, str) and content.strip():
-            items.append(Item("you", content.strip()))
+            item = user_item(content)
+            if item:
+                items.append(item)
+        elif entry.get("type") == "user" and isinstance(content, list):
+            for block in content:  # tool results are skipped; an interruption is worth a line
+                if isinstance(block, dict) and block.get("type") == "text" and block.get("text", "").startswith("[Request interrupted"):
+                    items.append(Item("event", block["text"].strip("[] ")))
         elif entry.get("type") == "assistant" and isinstance(content, list):
             for block in content:
                 if not isinstance(block, dict):
