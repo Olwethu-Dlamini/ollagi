@@ -44,7 +44,7 @@ from pydantic import BaseModel
 
 from collections import deque
 
-from ollagi import access, claude_screen, grouping, outside, queue as queueing, sessions, slack_outbox, system, watcher as watching
+from ollagi import access, claude_screen, desktop, grouping, outside, queue as queueing, sessions, slack_outbox, system, watcher as watching
 from ollagi.budget import Limits, how_many_can_start
 from ollagi.config import Config
 from ollagi.processes import find_sessions, read_processes
@@ -112,8 +112,11 @@ DRAFT_WORTHY = (" done", "waiting for you", "usage limit", "failed")
 
 def create_app(config: Config, machine=None, sessions_api=sessions, run_watcher=False, phone_url=None,
                queue_store=None, run_queue=False, command_for=None, results_dir=None, jira_client=None,
-               outbox=None, outside_api=outside) -> FastAPI:
+               outbox=None, outside_api=outside, desktop_api=None) -> FastAPI:
     machine = machine or real_machine()
+    # Windows on this laptop for a session (docs/decisions/0017). Only the page's Start and the
+    # open/close button use them; the overnight queue never opens one.
+    laptop = desktop_api or desktop.Laptop(config.desktop)
     watcher = watching.Watcher(config.watcher)
     store = queue_store or queueing.Store()
     drafts = outbox or slack_outbox.Outbox()
@@ -278,12 +281,15 @@ def create_app(config: Config, machine=None, sessions_api=sessions, run_watcher=
         _require_session(sessions_api, name)
         if sessions_api.scope_state(name)[0]:
             # Not an error: the session is fine, its tmux is just paused and cannot draw the screen.
-            return {"name": name, "frozen": True, "text": None, "state": "frozen", "question": None, "options": []}
+            # Its windows are not counted either: a paused tmux would not answer.
+            return {"name": name, "frozen": True, "text": None, "state": "frozen", "question": None, "options": [],
+                    "windows": None}
         text = sessions_api.screen(name, lines=min(max(lines, 10), 2000), colours=True)
         reading = claude_screen.read(text)
         return {
             "name": name, "frozen": False, "text": text, "state": reading.state,
             "question": reading.question, "options": [asdict(o) for o in reading.options],
+            "windows": laptop.count(name),
         }
 
     @app.post("/api/sessions")
@@ -299,7 +305,20 @@ def create_app(config: Config, machine=None, sessions_api=sessions, run_watcher=
             raise HTTPException(400, str(error)) from error
         except RuntimeError as error:
             raise HTTPException(500, str(error)) from error
-        return {"started": body.name}
+        window = laptop.open(body.name) if config.desktop.open_on_start else False
+        return {"started": body.name, "window": window}
+
+    @app.post("/api/sessions/{name}/desktop")
+    def show_on_desktop(name: str):
+        _require_session(sessions_api, name)
+        if not laptop.open(name):
+            raise HTTPException(409, "no desktop is running on the laptop to show it on")
+        return {"opened": name}
+
+    @app.post("/api/sessions/{name}/desktop/close")
+    def close_on_desktop(name: str):
+        _require_session(sessions_api, name)
+        return {"closed": laptop.close(name)}
 
     @app.post("/api/sessions/{name}/send")
     def send(name: str, body: SendRequest):

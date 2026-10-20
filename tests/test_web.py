@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 from ollagi.budget import GIB
 from ollagi.config import Config, Project
+from ollagi.desktop import Settings
 from ollagi.processes import Proc
 from ollagi.queue import Store
 from ollagi.sessions import SessionInfo
@@ -143,12 +144,36 @@ class FakeOutside:
         return True
 
 
-def client(fake_sessions, available_gib=8.0, jira=None, outbox=None, outside_api=None, **config):
+class FakeWindows:
+    """Stands in for desktop.Laptop: remembers which sessions got a window on the laptop."""
+
+    def __init__(self, desktop_running=True):
+        self.desktop_running = desktop_running
+        self.opened = []
+        self.counted = []
+
+    def open(self, name):
+        if self.desktop_running:
+            self.opened.append(name)
+        return self.desktop_running
+
+    def count(self, name):
+        self.counted.append(name)
+        return self.opened.count(name)
+
+    def close(self, name):
+        closed = self.opened.count(name)
+        self.opened = [n for n in self.opened if n != name]
+        return closed
+
+
+def client(fake_sessions, available_gib=8.0, jira=None, outbox=None, outside_api=None, windows=None, **config):
     from ollagi.web import create_app
 
     cfg = Config(projects=(Project("simedia", "/work/DATA!"),), **config)
     app = create_app(cfg, machine=machine(available_gib), sessions_api=fake_sessions, queue_store=temp_store(),
-                     jira_client=jira or FakeJira(), outbox=outbox or temp_outbox(), outside_api=outside_api or FakeOutside())
+                     jira_client=jira or FakeJira(), outbox=outbox or temp_outbox(), outside_api=outside_api or FakeOutside(),
+                     desktop_api=windows if windows is not None else FakeWindows())
     return TestClient(app, base_url="http://127.0.0.1:8765")
 
 
@@ -376,3 +401,57 @@ def test_take_over_needs_the_exact_name_and_an_idle_session(fake_sessions):
     assert done["session"] == "api-12"  # folder name plus the old name's ending
     assert fake_sessions.running["api-12"] == "/work/DATA!/api"
     assert fake_sessions.commands["api-12"] == ["claude", "--resume", "conv-1"]  # the same conversation
+
+
+def test_a_session_started_from_the_page_also_opens_on_the_laptop(fake_sessions):
+    windows = FakeWindows()
+    c = client(fake_sessions, windows=windows)
+    started = c.post("/api/sessions", json={"name": "sd-1", "directory": "/work/DATA!"}, headers=CHANGE).json()
+    assert windows.opened == ["sd-1"]
+    assert started == {"started": "sd-1", "window": True}
+
+
+def test_no_window_when_opening_on_start_is_switched_off(fake_sessions):
+    windows = FakeWindows()
+    c = client(fake_sessions, windows=windows, desktop=Settings(open_on_start=False))
+    c.post("/api/sessions", json={"name": "sd-1", "directory": "/work/DATA!"}, headers=CHANGE)
+    assert windows.opened == []
+
+
+def test_a_running_session_can_be_shown_on_the_desktop_when_one_is_there(fake_sessions):
+    windows = FakeWindows()
+    c = client(fake_sessions, windows=windows)
+    assert c.post("/api/sessions/demo/desktop", headers=CHANGE).json() == {"opened": "demo"}
+    assert windows.opened == ["demo"]
+    assert c.post("/api/sessions/nope/desktop", headers=CHANGE).status_code == 404
+    nobody_home = client(fake_sessions, windows=FakeWindows(desktop_running=False))
+    assert nobody_home.post("/api/sessions/demo/desktop", headers=CHANGE).status_code == 409
+
+
+def test_overnight_queue_tasks_open_no_window(fake_sessions, tmp_path):
+    windows = FakeWindows()
+    c = client(fake_sessions, windows=windows)
+    c.post("/api/queue", json={"directory": str(tmp_path), "prompt": "fix it"}, headers=CHANGE)
+    note = c.app.state.queue_runner.step(1_000)
+    assert "started as session q1" in note
+    assert "q1" in fake_sessions.running
+    assert windows.opened == []
+
+
+def test_the_button_closes_the_windows_and_the_session_keeps_running(fake_sessions):
+    windows = FakeWindows()
+    c = client(fake_sessions, windows=windows)
+    c.post("/api/sessions/demo/desktop", headers=CHANGE)
+    assert c.get("/api/sessions/demo/screen").json()["windows"] == 1
+    assert c.post("/api/sessions/demo/desktop/close", headers=CHANGE).json() == {"closed": 1}
+    assert c.get("/api/sessions/demo/screen").json()["windows"] == 0
+    assert "demo" in fake_sessions.running
+    assert c.post("/api/sessions/nope/desktop/close", headers=CHANGE).status_code == 404
+
+
+def test_a_frozen_session_is_not_asked_for_its_windows(fake_sessions):
+    windows = FakeWindows()
+    fake_sessions.frozen.add("demo")
+    c = client(fake_sessions, windows=windows)
+    assert c.get("/api/sessions/demo/screen").json()["windows"] is None
+    assert windows.counted == []

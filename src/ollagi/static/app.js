@@ -250,6 +250,7 @@ async function refreshViewer() {
   $("v-dot").className = `dot ${data.state}`;
   $("frozen-note").hidden = !data.frozen;
   $("v-pause").hidden = data.frozen;
+  showLaptopButton(data.windows);
   if (data.frozen) return;  // its tmux is paused too, so keep the last screen
 
   if (data.text !== lastText) {
@@ -328,6 +329,30 @@ for (const tab of document.querySelectorAll(".dock-tabs button")) {
     if (open) tab.classList.add("on");
   };
 }
+
+// The laptop button: "Open on laptop" when no terminal window shows this session, "Close on laptop"
+// when one does. Closing detaches the windows; the session keeps running. Hidden while frozen,
+// because a paused tmux cannot say how many windows it has (windows is then null).
+function showLaptopButton(windows) {
+  const button = $("v-laptop");
+  button.hidden = windows === null || windows === undefined;
+  button.dataset.open = windows > 0 ? "1" : "";
+  button.textContent = windows > 0 ? "Close on laptop" : "Open on laptop";
+}
+
+$("v-laptop").onclick = async () => {
+  const button = $("v-laptop");
+  button.disabled = true;
+  try {
+    const action = button.dataset.open ? "desktop/close" : "desktop";
+    await api(`/api/sessions/${current}/${action}`, {});
+  } catch (error) {
+    alert(error.message);  // e.g. no desktop is running on the laptop
+  } finally {
+    button.disabled = false;
+    setTimeout(refreshViewer, 700);  // the window needs a moment to attach or close
+  }
+};
 
 $("v-pause").onclick = async () => { $("v-menu").hidden = true; await api(`/api/sessions/${current}/freeze`, {}); refreshViewer(); };
 $("v-resume").onclick = async () => { await api(`/api/sessions/${current}/thaw`, {}); lastText = ""; setTimeout(refreshViewer, 300); };
