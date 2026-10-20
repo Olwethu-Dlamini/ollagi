@@ -51,6 +51,32 @@ bash session already gives the shell (`ollagi start NAME DIR -- bash`).
 - Over plain `http://`, the bytes between phone and laptop are encrypted by Tailscale (WireGuard),
   not by the page. HTTPS for the tailnet is still the next step.
 
+## RAM, measured
+
+Question: does Live use more RAM on the laptop than the plain view? Yes, about 5 MiB, and only
+while it is open. Nothing stays behind when it closes.
+
+Measured 2026-10-20 on a throwaway `bash` session, page driven by headless Chromium at phone size
+(the browser itself runs outside ollagi and is not counted; on the phone it is the phone's memory).
+"Service" is everything in `ollagi.service`: the server and the `tmux attach` it starts for Live,
+summed RSS. "Session" is the session's slice, `anon` from `memory.stat`.
+
+- No page open: service 54.1 MiB, session 3.7 MiB, no tmux client.
+- Plain view open, 20 s: service 54.7 MiB (+0.6), session 3.7 MiB.
+- Live open, 20 s: service 60.0 MiB (+5.3: the one `tmux: client` process), session 3.7 MiB.
+- Live, after printing 200,000 lines: service 60.1 MiB, session 9.5 MiB. The session grows because
+  tmux keeps up to 50,000 lines of scrollback (`history-limit`); the same output grows it as much
+  without Live, and the limit caps it.
+- Live off: service 54.9 MiB, no client left, session unchanged.
+
+For comparison: a laptop window (0017) is about 31 MiB, a Claude session 185 to 380 MiB.
+
+The server creeps up while any session view is open, with or without Live: 25 Live on/off rounds
+took it from 54.9 to 59.7 MiB, and then 150 s of the plain view alone took it from 59.7 to
+63.1 MiB, in steps of about 2 MiB. With no page open it stayed flat (41.0 MiB `anon` before and
+after). So that creep belongs to the page's screen reading, not to Live. Whether it levels off is
+not measured yet.
+
 ## Checked
 
 On the laptop, 2026-10-20, with a throwaway `bash` session (`livetest`), headless Chromium, first on
