@@ -130,7 +130,28 @@ same moment can break it, so every database method in `queue.py` takes a lock fi
 - A tmux server keeps the programs running; a client is a terminal attached to it. Every window
   that shows a session runs its own small `tmux attach`, which is a client. `tmux list-clients`
   lists them, so counting them says how many windows show the session.
-- `tmux detach-client -s main` detaches every client of the session. Each window's program then
-  ends, so the window closes, while the server and Claude inside it keep running.
+- `tmux detach-client -t /dev/pts/N` detaches one client, named by its terminal (tty). The
+  window's program then ends, so the window closes, while the server and Claude inside it keep
+  running. Closing windows detaches them one by one this way, skipping a live terminal in the
+  browser (decision 0018); `-s main` would detach every client at once.
 - `uwsm app -- foot ...` starts foot as its own systemd unit, so it belongs to the desktop, not to
   whichever program asked for it.
+
+## Pseudo-terminals, WebSockets and the Origin header (decision 0018)
+
+- A pseudo-terminal (pty) is a pair of ends the kernel gives out: a program on one end believes it
+  is in a terminal window; whoever holds the other end reads what it prints and writes what it
+  should see as typing. `os.openpty()` makes one. The live terminal runs `tmux attach` on one end
+  and the server holds the other.
+- The kernel stores a terminal's size on the pty. `TIOCSWINSZ` (an ioctl) changes it, and the
+  kernel then signals SIGWINCH to the programs whose controlling terminal it is, so they redraw.
+  `setsid -c` gives a program its own session with the pty as that controlling terminal.
+- A WebSocket starts as an HTTP request that asks to "upgrade"; the server answers 101 and the
+  connection stays open, carrying messages both ways. That is how keystrokes and output travel
+  between xterm.js in the browser and the pty.
+- A browser opens a WebSocket to any address without asking the server first (no preflight), so a
+  custom header cannot protect it. But it always sends `Origin`, naming the page that asked, and a
+  website cannot change it. Comparing Origin with Host refuses every other website.
+- `/proc/<pid>/environ` holds a process's environment, NAME=value entries separated by NUL bytes.
+  ollagi marks the browser's `tmux attach` with `OLLAGI_VIEWER=browser` and reads the mark there to
+  tell it apart from windows on the laptop.
