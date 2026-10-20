@@ -202,9 +202,17 @@
     <div class="dock-tabs">
       <button data-panel="keys">Keys</button>
       <button data-panel="quick">Quick</button>
+      <button data-panel="summary">Summary</button>
     </div>
     <div class="pad" id="panel-keys" hidden></div>
     <div class="quick" id="panel-quick" hidden></div>
+    <!-- A short summary of this session, written by Haiku only when the button is pressed
+         (docs/decisions/0019): every press spends tokens from the Claude plan. -->
+    <div class="summary" id="panel-summary" hidden>
+      <div id="summary-text" class="summary-text">What is this session doing? Press the button to ask Haiku.</div>
+      <div class="kv"><span id="summary-meta" class="summary-meta">about 600 tokens per press</span>
+        <button class="plain" id="summary-go">Summarise</button></div>
+    </div>
     <form class="composer" id="composer">
       <input id="reply" placeholder="Type a reply…" autocomplete="off" autocapitalize="sentences">
       <button class="send" type="submit" title="Send">➤</button>

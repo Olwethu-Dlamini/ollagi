@@ -212,6 +212,7 @@ function openViewer(name) {
   if (name !== current) stopLive();  // a live terminal belongs to one session
   current = name;
   lastText = "";
+  if (!$("panel-summary").hidden) showSummary();  // the summary shown belongs to the session shown
   $("viewer").hidden = false;
   $("v-menu").hidden = true;
   $("screen").textContent = "";
@@ -333,11 +334,38 @@ for (const tab of document.querySelectorAll(".dock-tabs button")) {
   tab.onclick = () => {
     const open = !tab.classList.contains("on");
     for (const t of document.querySelectorAll(".dock-tabs button")) t.classList.remove("on");
-    $("panel-keys").hidden = !(open && tab.dataset.panel === "keys");
-    $("panel-quick").hidden = !(open && tab.dataset.panel === "quick");
+    for (const panel of ["keys", "quick", "summary"]) $(`panel-${panel}`).hidden = !(open && tab.dataset.panel === panel);
+    if (open && tab.dataset.panel === "summary") showSummary();
     if (open) tab.classList.add("on");
   };
 }
+
+// Summary (docs/decisions/0019): Haiku reads the end of the screen and answers in three lines.
+// Only the button spends tokens; opening the tab shows the last summary of this session, if any.
+const summaries = {};  // session name -> { text, model, input_tokens, output_tokens, seconds, at }
+
+function showSummary() {
+  const last = summaries[current];
+  $("summary-text").textContent = last ? last.text : "What is this session doing? Press the button to ask Haiku.";
+  $("summary-meta").textContent = last
+    ? `${last.model.replace("claude-", "").replace(/-\d{8}$/, "")} · ${last.input_tokens} in, ${last.output_tokens} out · ${last.seconds} s · ${age(Math.round((Date.now() - last.at) / 1000))} ago`
+    : "about 600 tokens per press";
+}
+
+$("summary-go").onclick = async () => {
+  const name = current, button = $("summary-go");
+  button.disabled = true;
+  button.textContent = "Asking…";
+  try {
+    summaries[name] = { ...(await api(`/api/sessions/${name}/summary`, {})), at: Date.now() };
+    if (current === name) showSummary();
+  } catch (error) {
+    if (current === name) { $("summary-text").textContent = error.message; $("summary-meta").textContent = "no summary"; }
+  } finally {
+    button.disabled = false;
+    button.textContent = "Summarise";
+  }
+};
 
 // The laptop button: "Open on laptop" when no terminal window shows this session, "Close on laptop"
 // when one does. Closing detaches the windows; the session keeps running. Hidden while frozen,

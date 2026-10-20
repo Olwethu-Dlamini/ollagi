@@ -136,6 +136,9 @@ td:last-child { text-align: right; font-family: var(--mono); }
 .pad { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; }
 .pad button { padding: 11px 0; border-radius: 8px; border: 1px solid var(--line); background: var(--raised); font: 13px var(--mono); }
 .pad .wide { grid-column: span 2; }
+.summary { display: grid; gap: 8px; }
+.summary-text { white-space: pre-wrap; font-size: 14px; line-height: 1.45; max-height: 30vh; overflow: auto; }
+.summary-meta { font: 12px var(--mono); color: var(--muted); }
 .quick { display: flex; flex-wrap: wrap; gap: 6px; }
 .quick button { padding: 9px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--raised); font: 13px var(--mono); }
 .quick button.armed { border-color: var(--needs); color: var(--needs); }
