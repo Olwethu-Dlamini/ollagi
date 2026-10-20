@@ -192,11 +192,17 @@ def client(fake_sessions, available_gib=8.0, jira=None, outbox=None, outside_api
     return TestClient(app, base_url="http://127.0.0.1:8765")
 
 
-def test_the_page_and_its_three_files_are_served_and_nothing_else(fake_sessions):
+def test_the_page_and_its_files_are_served_and_nothing_else(fake_sessions):
     c = client(fake_sessions)
     assert "<title>ollagi</title>" in c.get("/").text
-    for name in ("style.css", "app.js", "ansi.js"):
+    for name in ("style.css", "app.js", "ansi.js", "xterm.css"):
         assert c.get(f"/static/{name}").status_code == 200
+    # Loaded with import(), which a browser only accepts with a JavaScript content type.
+    for name in ("xterm.mjs", "xterm-addon-fit.mjs"):
+        response = c.get(f"/static/{name}")
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/javascript")
+    assert c.get("/static/xterm-LICENSE.txt").status_code == 404
     assert c.get("/static/..%2Fweb.py").status_code == 404
     assert c.get("/static/index.html").status_code == 404
 

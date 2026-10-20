@@ -176,6 +176,8 @@
     <button class="icon-button" id="v-back">‹</button>
     <span class="dot" id="v-dot"></span>
     <div class="title"><strong id="v-name"></strong><span id="v-sub"></span></div>
+    <!-- A live terminal for this session in the page (docs/decisions/0018). -->
+    <button class="icon-button" id="v-live" title="A real terminal: type, arrows and menus work as on the laptop">Live</button>
     <!-- Open or close this session in a terminal window on the laptop (docs/decisions/0017). -->
     <button class="icon-button" id="v-laptop" hidden></button>
     <button class="icon-button" id="v-more">⋯</button>
@@ -190,6 +192,7 @@
     <button class="primary" id="v-resume">Resume</button>
   </div>
   <pre id="screen"></pre>
+  <div id="live" hidden></div>
   <div class="ask" id="ask" hidden>
     <span class="label">CLAUDE IS ASKING</span>
     <span class="question" id="ask-question"></span>

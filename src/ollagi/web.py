@@ -194,7 +194,7 @@ def create_app(config: Config, machine=None, sessions_api=sessions, run_watcher=
     @app.get("/static/{name}")
     def static_file(name: str):
         """The page's own files. Only these names are served, so no other file can be reached."""
-        if name not in {"style.css", "app.js", "ansi.js"}:
+        if name not in {"style.css", "app.js", "ansi.js", "xterm.mjs", "xterm-addon-fit.mjs", "xterm.css"}:
             raise HTTPException(404, "no such file")
         return FileResponse(STATIC / name)
 

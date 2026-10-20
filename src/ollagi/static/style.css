@@ -117,6 +117,10 @@ td:last-child { text-align: right; font-family: var(--mono); }
 .switcher button.on { border-color: var(--text); }
 #screen { flex: 1; margin: 0; padding: 10px 12px; overflow: auto; background: var(--screen-bg); color: var(--screen-text);
           font: 12px/1.4 var(--mono); white-space: pre-wrap; word-break: break-word; }
+/* The live terminal: xterm.js draws inside #live and needs a box with a real size to fit to. */
+#live { flex: 1; min-height: 0; padding: 6px 4px 0 8px; background: var(--screen-bg); }
+#live .xterm { height: 100%; }
+#v-live.on { border-color: var(--text); background: var(--text); color: var(--bg); }
 .notice { padding: 14px; border-bottom: 1px solid var(--line); background: var(--surface); display: flex; gap: 12px; align-items: center; }
 .ask { border-top: 1px solid var(--line); background: var(--surface); padding: 12px; display: grid; gap: 8px; max-height: 46vh; overflow: auto; }
 .ask .label { font: 600 11px var(--mono); letter-spacing: 1px; color: var(--needs); }

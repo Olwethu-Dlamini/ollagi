@@ -209,17 +209,25 @@ function fillProjects() {
 let screenTimer = null, lastText = "";
 
 function openViewer(name) {
+  if (name !== current) stopLive();  // a live terminal belongs to one session
   current = name;
   lastText = "";
   $("viewer").hidden = false;
   $("v-menu").hidden = true;
   $("screen").textContent = "";
   refreshViewer();
+  pollViewer();
+}
+
+// The plain view reads the screen every 1.5 s. A live terminal draws itself, so the page then only
+// asks every 4 s, for the state dot, the laptop button and the menu buttons.
+function pollViewer() {
   clearInterval(screenTimer);
-  screenTimer = setInterval(refreshViewer, 1500);
+  screenTimer = setInterval(refreshViewer, live ? 4000 : 1500);
 }
 
 function closeViewer() {
+  stopLive();
   clearInterval(screenTimer);
   current = null;
   $("viewer").hidden = true;
@@ -251,9 +259,9 @@ async function refreshViewer() {
   $("frozen-note").hidden = !data.frozen;
   $("v-pause").hidden = data.frozen;
   showLaptopButton(data.windows);
-  if (data.frozen) return;  // its tmux is paused too, so keep the last screen
+  if (data.frozen) { stopLive(); return; }  // its tmux is paused too, so keep the last screen
 
-  if (data.text !== lastText) {
+  if (!live && data.text !== lastText) {
     const pre = $("screen");
     const atBottom = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 30;
     renderAnsi(data.text, pre);
@@ -267,6 +275,7 @@ async function refreshViewer() {
   $("ask").hidden = data.state !== "needs_you";
   // The card takes room from the screen above it, so keep the screen's last lines in view.
   if (wasHidden && !$("ask").hidden) $("screen").scrollTop = $("screen").scrollHeight;
+  if (live && wasHidden !== $("ask").hidden) live.fit();
   if (data.state === "needs_you") {
     $("ask-question").textContent = data.question || "";
     $("ask-options").replaceChildren(...data.options.map((o) => {
@@ -352,6 +361,79 @@ $("v-laptop").onclick = async () => {
     button.disabled = false;
     setTimeout(refreshViewer, 700);  // the window needs a moment to attach or close
   }
+};
+
+// ---- the live terminal (docs/decisions/0018) -------------------------------------------------
+// xterm.js draws a real terminal in #live. Its bytes come from `tmux attach` for this session,
+// which the server runs in a pty and relays over a WebSocket (src/ollagi/terminal.py). xterm.js is
+// about 350 KB, so it is only loaded the first time Live is pressed.
+let live = null;  // { term, socket, fit, observer } while a live terminal is open
+
+async function loadXterm() {
+  if (!document.querySelector('link[href="/static/xterm.css"]')) {
+    document.head.append(Object.assign(document.createElement("link"), { rel: "stylesheet", href: "/static/xterm.css" }));
+  }
+  const [{ Terminal }, { FitAddon }] = await Promise.all([import("/static/xterm.mjs"), import("/static/xterm-addon-fit.mjs")]);
+  return { Terminal, FitAddon };
+}
+
+async function startLive() {
+  const name = current;
+  const { Terminal, FitAddon } = await loadXterm();
+  if (current !== name || live) return;  // the viewer moved on while xterm.js was loading
+  const styles = getComputedStyle(document.documentElement);
+  const term = new Terminal({
+    fontFamily: styles.getPropertyValue("--mono") || "monospace",
+    fontSize: window.innerWidth < 600 ? 11 : 13,
+    cursorBlink: true,
+    theme: { background: styles.getPropertyValue("--screen-bg").trim(), foreground: styles.getPropertyValue("--screen-text").trim() },
+  });
+  const fitter = new FitAddon();
+  term.loadAddon(fitter);
+  $("screen").hidden = true;
+  $("live").hidden = false;
+  term.open($("live"));
+  fitter.fit();
+
+  const scheme = location.protocol === "https:" ? "wss" : "ws";
+  const socket = new WebSocket(`${scheme}://${location.host}/api/sessions/${name}/terminal?rows=${term.rows}&cols=${term.cols}`);
+  socket.binaryType = "arraybuffer";
+  const send = (message) => { if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message)); };
+  socket.onmessage = (event) => term.write(new Uint8Array(event.data));
+  socket.onclose = (event) => {
+    // Shown in the terminal itself; Live goes back to the plain view on the next press.
+    term.write(`\r\n\x1b[2m[terminal closed${event.reason ? ": " + event.reason : ""}]\x1b[0m\r\n`);
+    if (live && live.socket === socket) live.closed = true;
+    $("v-live").classList.remove("on");
+  };
+  term.onData((data) => send({ type: "input", data }));
+  term.onResize(({ rows, cols }) => send({ type: "resize", rows, cols }));
+
+  // Rotating the phone or opening the keyboard changes the box; fit the terminal to it again.
+  const observer = new ResizeObserver(() => fitter.fit());
+  observer.observe($("live"));
+  live = { term, socket, observer, fit: () => fitter.fit(), closed: false };
+  $("v-live").classList.add("on");
+  pollViewer();
+  term.focus();
+}
+
+function stopLive() {
+  if (!live) return;
+  live.observer.disconnect();
+  live.socket.close();  // the server hangs up `tmux attach`; the session keeps running
+  live.term.dispose();
+  live = null;
+  $("live").hidden = true;
+  $("screen").hidden = false;
+  $("v-live").classList.remove("on");
+  lastText = "";  // redraw the plain view at once
+  if (current) { refreshViewer(); pollViewer(); }
+}
+
+$("v-live").onclick = () => {
+  if (live) stopLive();
+  else startLive().catch((error) => alert(`Live terminal: ${error.message}`));
 };
 
 $("v-pause").onclick = async () => { $("v-menu").hidden = true; await api(`/api/sessions/${current}/freeze`, {}); refreshViewer(); };
