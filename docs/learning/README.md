@@ -155,3 +155,15 @@ same moment can break it, so every database method in `queue.py` takes a lock fi
 - `/proc/<pid>/environ` holds a process's environment, NAME=value entries separated by NUL bytes.
   ollagi marks the browser's `tmux attach` with `OLLAGI_VIEWER=browser` and reads the mark there to
   tell it apart from windows on the laptop.
+
+## `claude -p`, and text that tries to give orders (decision 0019)
+
+- `claude -p` ("print") sends one prompt, prints one answer and exits: no conversation. With
+  `--output-format json` the answer comes with what it cost (tokens, time, an equivalent price).
+- Claude Code normally loads a lot before the first word: settings, hooks, CLAUDE.md, memory, MCP
+  servers, tool descriptions. Every one of those is input tokens. Switching them off is what makes
+  a summary cost about 600 tokens instead of tens of thousands.
+- A screen can contain anything a program printed, including text such as "ignore your rules".
+  That is called prompt injection. The defences here: mark the screen as data (`<screen>` tags and
+  a system prompt that says so), and give the model no tools, so even a fooled model can only write
+  a wrong summary.
