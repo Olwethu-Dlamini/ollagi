@@ -388,14 +388,23 @@ function bubbles(items, open) {
   return out;
 }
 
-// A message's text, with ``` code blocks as monospace blocks. Always textContent, never HTML.
+// A message's text, with Claude's light markdown: ``` blocks, `code` and **bold**. Built from
+// elements and textContent, never HTML, so a message can only ever appear as text.
 function bubble(item) {
   const box = el("div", null, `msg ${item.role}`);
   item.text.split("```").forEach((part, i) => {
     if (i % 2 === 1) box.append(el("pre", part.replace(/^[a-z0-9+-]*\n/, "")));
-    else if (part) box.append(part);
+    else if (part) box.append(...inline(part));
   });
   return box;
+}
+
+function inline(text) {
+  return text.split(/(\*\*[^*\n]+\*\*|`[^`\n]+`)/).filter(Boolean).map((piece) => {
+    if (piece.startsWith("**") && piece.endsWith("**") && piece.length > 4) return el("strong", piece.slice(2, -2));
+    if (piece.startsWith("`") && piece.endsWith("`") && piece.length > 2) return el("code", piece.slice(1, -1));
+    return document.createTextNode(piece);
+  });
 }
 
 // ---- typing and keys ---------------------------------------------------------------------------

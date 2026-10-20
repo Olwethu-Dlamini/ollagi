@@ -139,6 +139,8 @@ td:last-child { text-align: right; font-family: var(--mono); }
 .msg.you { align-self: flex-end; background: var(--accent); color: #fff; border-bottom-right-radius: 5px; }
 .msg pre { margin: 6px 0; padding: 8px; border-radius: 8px; background: var(--screen-bg); color: var(--screen-text);
            font: 12px/1.4 var(--mono); white-space: pre; overflow-x: auto; }
+.msg code { font: 13px var(--mono); padding: 1px 4px; border-radius: 4px; background: color-mix(in srgb, var(--text) 9%, transparent); }
+.msg.you code { background: rgba(255,255,255,.2); }
 .msg.event { align-self: center; background: transparent; color: var(--muted); font-size: 12px; padding: 2px; }
 .steps { align-self: flex-start; max-width: 92%; font: 12px/1.5 var(--mono); color: var(--muted); }
 .steps summary { list-style: none; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 2px 4px; }
