@@ -64,4 +64,5 @@ tailnet address:
 - Live off: plain view back, no client left, the session still running; no page errors;
 - a WebSocket upgrade with `Origin: https://evil.example` got 403, with the page's own origin 101.
 
-Not yet checked: a real phone (touch keyboard).
+On my phone through the tailnet, 2026-10-20: Live opened and the touch keyboard typed into the
+session without trouble.
