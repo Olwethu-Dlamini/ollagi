@@ -16,17 +16,19 @@
 <body>
 
 <header class="top">
-  <span class="brand">ollagi</span>
-  <button class="chip" id="chip-memory" title="Free memory and the RAM watcher's level">
-    <span class="dot" id="chip-level"></span><span id="chip-memory-text">MEM …</span>
-  </button>
-  <span class="chip" id="chip-cpu">CPU …</span>
-  <button class="icon-button" id="open-qr" title="Open on your phone">QR</button>
+  <div class="top-title">
+    <span class="brand">ollagi</span>
+    <!-- One quiet line about the machine; tapping it opens System. -->
+    <button class="machine" id="chip-memory" title="Memory and load">
+      <span class="dot" id="chip-level"></span><span id="chip-memory-text">…</span><span id="chip-cpu"></span>
+    </button>
+  </div>
+  <button class="text-button" id="open-qr" title="Open on your phone">Phone</button>
+  <button class="text-button strong" id="new-open">New</button>
 </header>
 
 <!-- ===== Sessions: the home screen ===================================================== -->
 <main id="view-sessions">
-  <div class="summary" id="summary"></div>
   <div class="filters" id="filters"></div>
   <div id="groups"></div>
   <p class="muted" id="outside"></p>
@@ -122,7 +124,6 @@
   <button data-view="queue">Queue</button>
   <button data-view="system">System</button>
 </nav>
-<button class="fab" id="new-open">+ New</button>
 
 <!-- ===== Start a session (a sheet that slides up) ======================================== -->
 <div class="backdrop" id="new-sheet" hidden>
@@ -171,21 +172,20 @@
   </div>
 </div>
 
-<!-- ===== One session, full screen: a chat, like a messaging app (docs/decisions/0020) ========== -->
+<!-- ===== One session, full screen: Claude's own screen (docs/decisions/0021) ============== -->
 <div id="viewer" hidden>
   <div class="v-head">
-    <button class="icon-button" id="v-back" aria-label="Back to all sessions">‹</button>
+    <button class="icon-button" id="v-back" aria-label="Back to all sessions"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
     <!-- The name opens a list of sessions to hop between. -->
     <button class="v-title" id="v-title" aria-label="Switch session">
       <span class="dot" id="v-dot"></span>
       <span class="title"><strong id="v-name"></strong><span id="v-sub"></span></span>
     </button>
-    <div class="seg" role="tablist">
-      <button id="tab-chat" role="tab" class="on">Chat</button><button id="tab-term" role="tab">Term</button>
-    </div>
-    <button class="icon-button" id="v-more" aria-label="More">⋯</button>
+    <button class="icon-button" id="v-more" aria-label="More"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="19" cy="12" r="1.3"/></svg></button>
   </div>
   <div class="menu" id="v-menu" hidden>
+    <!-- Live terminal or a copy of the screen (0018, 0021). -->
+    <button id="v-live"></button>
     <!-- Open or close this session in a terminal window on the laptop (docs/decisions/0017). -->
     <button id="v-laptop" hidden></button>
     <button id="v-pause">Pause (freeze)</button>
@@ -193,38 +193,28 @@
   </div>
   <div class="menu switcher" id="switcher" hidden></div>
   <div class="notice" id="frozen-note" hidden>
-    <span>Frozen: every process is paused and nothing is lost.</span>
+    <span>Paused. Every process is frozen and nothing is lost.</span>
     <button class="primary" id="v-resume">Resume</button>
   </div>
 
-  <!-- Chat: the conversation, read from Claude's own files (no tokens). -->
-  <div class="chat" id="chat">
-    <div id="chat-items"></div>
-    <div id="chat-ask"></div>
-    <div class="chat-status" id="chat-status" hidden></div>
-  </div>
-
-  <!-- Term: the screen itself. Plain is a copy every 1.5 s; Live is a real terminal (0018). -->
-  <div class="term" id="term" hidden>
-    <div class="term-bar">
-      <button class="icon-button" id="v-live" title="A real terminal: type, arrows and menus work as on the laptop">Live</button>
-      <span class="hint" id="term-hint">Lines as Claude drew them; swipe sideways for wide ones.</span>
-    </div>
+  <!-- Claude's screen: Live is the real terminal at the phone's width; the copy is the screen as
+       drawn on the laptop, read every 1.5 s, lines left as they are. -->
+  <div class="term" id="term">
     <pre id="screen"></pre>
     <div id="live" hidden></div>
-    <div id="term-ask"></div>
   </div>
+  <div id="term-ask"></div>
 
   <div class="composer-bar">
-    <!-- Keys a phone keyboard lacks, in one row you swipe sideways (shown in Term). -->
-    <div class="keys-row" id="keys-row" hidden></div>
+    <!-- Keys a phone keyboard lacks, in one row you swipe sideways. -->
+    <div class="keys-row" id="keys-row"></div>
     <form class="composer" id="composer">
-      <button type="button" class="round" id="tools-open" aria-label="Keys, quick replies and summary">+</button>
+      <button type="button" class="icon-button round" id="tools-open" aria-label="Keys, quick replies and summary"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
       <div class="field">
-        <input id="reply" placeholder="Message…" autocomplete="off" autocapitalize="sentences" enterkeyhint="send">
-        <button type="button" class="mic" id="mic" aria-label="Speak a message">🎤</button>
+        <input id="reply" placeholder="Message" autocomplete="off" autocapitalize="sentences" enterkeyhint="send">
+        <button type="button" class="icon-button mic" id="mic" aria-label="Speak a message"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></svg></button>
       </div>
-      <button class="send" type="submit" aria-label="Send">➤</button>
+      <button class="send" type="submit" aria-label="Send"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
     </form>
   </div>
 </div>

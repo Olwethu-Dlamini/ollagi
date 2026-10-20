@@ -76,16 +76,7 @@ function renderSessions() {
 
   // Both kinds share one list: ollagi's own sessions, and those started in a terminal window.
   const all = [...sessions, ...outsideSessions.map((o) => ({ ...o, outside: true }))];
-  const counts = {};
-  for (const s of all) counts[s.state] = (counts[s.state] || 0) + 1;
-
-  $("summary").replaceChildren(...Object.keys(STATES).filter((k) => counts[k]).map((k) => {
-    const item = el("span", null, `${k}-count`);
-    item.append(el("span", null, `dot ${k}`), `${counts[k]} ${STATES[k]}`);
-    return item;
-  }));
-
-  // Project filter chips: All, then every project that has a session, marked with its most urgent dot.
+  // Project filters: All, then every project that has a session, marked with its most urgent dot.
   const names = [...new Set(all.map((s) => s.project))];
   $("filters").replaceChildren(...["All", ...names].map((name) => {
     const button = el("button", null, filter === name ? "on" : "");
@@ -99,7 +90,7 @@ function renderSessions() {
 
   const shown = all.filter((s) => filter === "All" || s.project === filter);
   if (!shown.length) {
-    $("groups").replaceChildren(el("div", "No sessions yet. Press + New to start Claude in a project.", "empty"));
+    $("groups").replaceChildren(el("div", "No sessions. Press New to start Claude in a project.", "empty"));
     return;
   }
   const groups = {};
@@ -108,18 +99,22 @@ function renderSessions() {
   for (const [project, list] of Object.entries(groups)) {
     list.sort((a, b) => rank(a.state) - rank(b.state));  // who needs you first
     const head = el("div", null, "group");
-    head.append(el("span", null, `dot ${mostUrgent(list)}`), project);
-    const tally = el("span", null, "counts");
-    for (const state of Object.keys(STATES)) {
-      const n = list.filter((s) => s.state === state).length;
-      if (n) { const t = el("span"); t.append(el("span", null, `dot ${state}`), " " + n); tally.append(t); }
-    }
-    head.append(tally);
+    const waiting = list.filter((s) => s.state === "needs_you").length;
+    head.append(project, el("span", waiting ? `${waiting} waiting for you` : `${list.length} running`, "counts"));
     const box = el("div", null, "list");
     for (const s of list) box.append(sessionRow(s));
     blocks.push(head, box);
   }
   $("groups").replaceChildren(...blocks);
+}
+
+// "working · 9h · 1.0 GiB": what a row and the session's header say under the name.
+function describe(s) {
+  return [STATES[s.state], age(s.age_seconds), size(s.memory_current)].filter(Boolean).join(" · ");
+}
+function size(bytes) {
+  if (bytes == null) return "";
+  return bytes >= GiB ? (bytes / GiB).toFixed(1) + " GiB" : Math.round(bytes / MiB) + " MiB";
 }
 
 function rank(state) { return Object.keys(STATES).indexOf(state); }
@@ -128,10 +123,8 @@ function mostUrgent(list) { return list.map((s) => s.state).sort((a, b) => rank(
 function sessionRow(s) {
   if (s.outside) return outsideRow(s);
   const row = el("button", null, `row ${s.state}`);
-  const sub = s.state === "needs_you" && s.question ? s.question : `${STATES[s.state]} · ${s.directory}`;
-  const meta = el("span", null, "meta");
-  meta.append(age(s.age_seconds), el("br"), mib(s.memory_current));
-  row.append(el("span", null, `dot ${s.state}`), el("span", s.name, "name"), meta, el("span", sub, "sub"));
+  const sub = s.state === "needs_you" && s.question ? s.question : describe(s);
+  row.append(el("span", null, `dot ${s.state}`), el("span", s.name, "name"), el("span", sub, "sub"));
   row.onclick = () => openViewer(s.name);
   return row;
 }
@@ -143,10 +136,8 @@ function outsideRow(s) {
   const row = el("button", null, `row ${s.state}`);
   const name = el("span", s.name, "name");
   name.append(el("span", "terminal", "tag"));
-  const meta = el("span", null, "meta");
-  meta.append(age(s.age_seconds), el("br"), mib(s.memory));
-  row.append(el("span", null, `dot ${s.state}`), name, meta,
-             el("span", `${OUTSIDE_WORD[s.status] || s.status} · ${s.cwd}`, "sub"));
+  row.append(el("span", null, `dot ${s.state}`), name,
+             el("span", [OUTSIDE_WORD[s.status] || s.status, age(s.age_seconds), size(s.memory)].join(" · "), "sub"));
   row.onclick = () => openOutside(s.pid);
   return row;
 }
@@ -205,52 +196,43 @@ function fillProjects() {
   }
 }
 
-// ---- one session: a chat, like a messaging app (docs/decisions/0020) ----------------------------
-// Chat shows the session's Claude conversation, read from Claude's own files (no tokens). Term
-// shows the screen itself: plain (a copy every 1.5 s) or Live (a real terminal, decision 0018).
-let screenTimer = null, chatTimer = null, lastText = "", lastChat = "", mode = "chat";
-let autoTerm = null;  // the session that was moved to Term because it runs no Claude
+// ---- one session: Claude's own screen (docs/decisions/0021) --------------------------------------
+// A session opens as a live terminal (0018): Claude's real screen, redrawn for this screen's width,
+// so it shows working, thinking or stopped as it happens. The other way, a copy of the screen as
+// drawn on the laptop (read every 1.5 s, lines left as they are), is one tap away in the ⋯ menu and
+// is used whenever the live terminal cannot run (a paused session, one that ended).
+let screenTimer = null, lastText = "";
+let liveEnded = null;  // the session whose live terminal closed by itself: no new one until reopened
+
+function readViewMode() {
+  try { return localStorage.getItem("ollagi.view") === "copy" ? "copy" : "live"; } catch { return "live"; }
+}
+let viewMode = readViewMode();  // remembered on this device only
 
 function openViewer(name) {
-  if (name !== current) { stopLive(); lastChat = ""; $("chat-items").replaceChildren(); $("chat-ask").replaceChildren(); }
+  if (name !== current) stopLive();
   current = name;
   lastText = "";
+  liveEnded = null;
+  lastQuestion = "";
   $("viewer").hidden = false;
   $("v-menu").hidden = true;
   $("switcher").hidden = true;
   $("screen").textContent = "";
-  setMode(mode);
-}
-
-function setMode(next) {
-  mode = next;
-  $("tab-chat").classList.toggle("on", mode === "chat");
-  $("tab-term").classList.toggle("on", mode === "term");
-  $("chat").hidden = mode !== "chat";
-  $("term").hidden = mode !== "term";
-  $("keys-row").hidden = mode !== "term";
-  if (mode !== "term") stopLive();
-  lastText = "";
   refreshViewer();
-  if (mode === "chat") refreshChat(true);
   pollViewer();
 }
-$("tab-chat").onclick = () => setMode("chat");
-$("tab-term").onclick = () => setMode("term");
 
-// The plain screen is read every 1.5 s. Chat and Live draw themselves, so the screen is then only
-// read every 4 s, for the state dot, the laptop button and a question's buttons.
+// The copy is read every 1.5 s. A live terminal draws itself, so the screen is then only read every
+// 4 s, for the state dot, the laptop item and a question's buttons.
 function pollViewer() {
   clearInterval(screenTimer);
-  clearInterval(chatTimer);
-  screenTimer = setInterval(refreshViewer, mode === "term" && !live ? 1500 : 4000);
-  if (mode === "chat") chatTimer = setInterval(refreshChat, 2500);
+  screenTimer = setInterval(refreshViewer, live ? 4000 : 1500);
 }
 
 function closeViewer() {
   stopLive();
   clearInterval(screenTimer);
-  clearInterval(chatTimer);
   current = null;
   $("viewer").hidden = true;
   refreshSessions();
@@ -259,14 +241,12 @@ $("v-back").onclick = closeViewer;
 $("v-more").onclick = () => { $("switcher").hidden = true; $("v-menu").hidden = !$("v-menu").hidden; };
 $("v-title").onclick = () => { $("v-menu").hidden = true; $("switcher").hidden = !$("switcher").hidden; };
 
-const STATUS_WORD = { working: "working…", needs_you: "waiting for you", done: "done", idle: "idle",
-                      frozen: "frozen", exited: "ended" };
-
 async function refreshViewer() {
   if (!current) return;
   const s = sessions.find((x) => x.name === current);
   $("v-name").textContent = current;
-  $("v-sub").textContent = s ? `${s.project} · ${age(s.age_seconds)} · ${mib(s.memory_current)}` : "";
+  $("v-sub").textContent = s ? describe(s) : "";
+  $("v-live").textContent = live ? "Show a copy of the screen" : "Show the live terminal";
 
   // Tapping the name lists every session, to hop between them without going back.
   $("switcher").replaceChildren(...sessions.map((x) => {
@@ -278,16 +258,19 @@ async function refreshViewer() {
 
   let data;
   try { data = await api(`/api/sessions/${current}/screen?lines=300`); }
-  catch (error) { if (mode === "term") $("screen").textContent = error.message; return; }
+  catch (error) { if (!live) $("screen").textContent = error.message; return; }
 
   $("v-dot").className = `dot ${data.state}`;
+  if (s) $("v-sub").textContent = describe({ ...s, state: data.state });  // the list may be a few seconds older
   $("frozen-note").hidden = !data.frozen;
   $("v-pause").hidden = data.frozen;
   showLaptopButton(data.windows);
-  showStatus(data.state);
   if (data.frozen) { stopLive(); return; }  // its tmux is paused too, so keep the last screen
 
-  if (mode === "term" && !live && data.text !== lastText) {
+  const wantLive = viewMode === "live" && liveEnded !== current && data.state !== "exited";
+  if (wantLive && !live && !starting) {
+    startLive().catch((error) => { liveEnded = current; $("screen").textContent = `Live terminal: ${error.message}`; });
+  } else if (!live && data.text !== lastText) {
     const pre = $("screen");
     const atBottom = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 30;
     renderAnsi(trimLines(data.text), pre);
@@ -303,21 +286,15 @@ function trimLines(text) {
   return text.split("\n").map((line) => line.replace(/[ \t]+((?:\x1b\[[0-9;]*m)*)$/, "$1")).join("\n");
 }
 
-function showStatus(state) {
-  const status = $("chat-status");
-  status.hidden = !STATUS_WORD[state];
-  status.replaceChildren(el("span", null, `dot ${state}`), STATUS_WORD[state] || "");
-}
-
-// A menu on screen (permission, question, plan) becomes a card with one button per choice: in the
-// chat after the last message, in Term above the keys. Tapping presses that number key.
+// A menu on screen (permission, question, plan) becomes one row of buttons above the keys, one per
+// choice; the question itself is on the screen just above.
+// Tapping one presses that number key, which is how Claude Code picks a numbered option.
 let lastQuestion = "";
 function showQuestion(data) {
   const asking = data.state === "needs_you" && data.options && data.options.length;
-  const key = asking ? JSON.stringify([mode, data.question, data.options]) : "";
+  const key = asking ? JSON.stringify([data.question, data.options]) : "";
   if (key === lastQuestion) return;
   lastQuestion = key;
-  $("chat-ask").replaceChildren();
   $("term-ask").replaceChildren();
   if (!asking) return;
   const card = el("div", null, "ask-card");
@@ -328,90 +305,14 @@ function showQuestion(data) {
     button.onclick = () => press(String(o.number));
     return button;
   }));
-  card.append(el("span", "CLAUDE IS ASKING", "label"), el("span", data.question || "", "question"), options);
-  (mode === "chat" ? $("chat-ask") : $("term-ask")).append(card);
-  if (mode === "chat") scrollChatIfFollowing(true);
-}
-
-// ---- the chat ----------------------------------------------------------------------------------
-async function refreshChat(first) {
-  if (!current || mode !== "chat") return;
-  const name = current;
-  let data;
-  try { data = await api(`/api/sessions/${name}/conversation`); } catch (error) { return; }
-  if (current !== name || mode !== "chat") return;
-  if (data.claude === false) {
-    // A session running something else (bash) has no conversation: show its screen instead, once.
-    if (autoTerm !== name) { autoTerm = name; setMode("term"); return; }
-    $("chat-items").replaceChildren(el("div", "This session runs no Claude, so there is no chat. Its screen is under Term.", "chat-empty"));
-    return;
-  }
-  const key = JSON.stringify(data.items);
-  if (key === lastChat) return;
-  lastChat = key;
-  const following = isFollowing();
-  const open = new Set([...document.querySelectorAll("#chat-items details[open]")].map((d) => d.dataset.key));
-  $("chat-items").replaceChildren(...(data.items.length ? bubbles(data.items, open)
-    : [el("div", data.frozen ? "Frozen: resume it to read the chat." : "No messages yet.", "chat-empty")]));
-  if (first || following) scrollChatIfFollowing(true);
-}
-
-function isFollowing() {
-  const box = $("chat");
-  return box.scrollTop + box.clientHeight >= box.scrollHeight - 60;
-}
-function scrollChatIfFollowing(force) {
-  if (force || isFollowing()) $("chat").scrollTop = $("chat").scrollHeight;
-}
-
-// Messages as bubbles. Tool steps in a row fold into one grey line that opens on a tap.
-function bubbles(items, open) {
-  const out = [];
-  let steps = [];
-  const flush = () => {
-    if (!steps.length) return;
-    const group = document.createElement("details");
-    group.className = "steps";
-    group.dataset.key = `${out.length}:${steps[0]}`;
-    group.open = open.has(group.dataset.key);
-    group.append(el("summary", steps.length === 1 ? steps[0] : `${steps.length} steps · ${steps[steps.length - 1]}`));
-    if (steps.length > 1) group.append(...steps.map((s) => el("div", s)));
-    out.push(group);
-    steps = [];
-  };
-  for (const item of items) {
-    if (item.role === "tool") { steps.push(item.text); continue; }
-    flush();
-    out.push(bubble(item));
-  }
-  flush();
-  return out;
-}
-
-// A message's text, with Claude's light markdown: ``` blocks, `code` and **bold**. Built from
-// elements and textContent, never HTML, so a message can only ever appear as text.
-function bubble(item) {
-  const box = el("div", null, `msg ${item.role}`);
-  item.text.split("```").forEach((part, i) => {
-    if (i % 2 === 1) box.append(el("pre", part.replace(/^[a-z0-9+-]*\n/, "")));
-    else if (part) box.append(...inline(part));
-  });
-  return box;
-}
-
-function inline(text) {
-  return text.split(/(\*\*[^*\n]+\*\*|`[^`\n]+`)/).filter(Boolean).map((piece) => {
-    if (piece.startsWith("**") && piece.endsWith("**") && piece.length > 4) return el("strong", piece.slice(2, -2));
-    if (piece.startsWith("`") && piece.endsWith("`") && piece.length > 2) return el("code", piece.slice(1, -1));
-    return document.createTextNode(piece);
-  });
+  card.append(options);  // the question itself is on the screen just above
+  $("term-ask").append(card);
 }
 
 // ---- typing and keys ---------------------------------------------------------------------------
 async function press(key) {
   await api(`/api/sessions/${current}/send`, { key });
   setTimeout(refreshViewer, 250);
-  if (mode === "chat") setTimeout(refreshChat, 900);
 }
 
 $("composer").onsubmit = async (event) => {
@@ -422,7 +323,6 @@ $("composer").onsubmit = async (event) => {
   await api(`/api/sessions/${current}/send`, { text });
   $("reply").value = "";
   setTimeout(refreshViewer, 300);
-  if (mode === "chat") { setTimeout(refreshChat, 900); scrollChatIfFollowing(true); }
 };
 
 const KEYS = [["Esc", "Escape"], ["Tab", "Tab"], ["⇧Tab", "BTab"], ["^C", "C-c"], ["↑", "Up"], ["↓", "Down"],
@@ -452,7 +352,6 @@ $("panel-quick").replaceChildren(...QUICK.map(([text, destructive]) => {
     await api(`/api/sessions/${current}/send`, { text });
     $("tools-sheet").hidden = true;
     setTimeout(refreshViewer, 300);
-    if (mode === "chat") setTimeout(refreshChat, 900);
   };
   return button;
 }));
@@ -486,8 +385,8 @@ $("summary-go").onclick = async () => {
 
 // ---- voice: speak a message into the box (docs/decisions/0020) ---------------------------------
 // The browser turns speech into text (Chrome does it with Google's speech service). The words land
-// in the box to be read and sent with ➤; nothing is sent by voice alone. Browsers only allow the
-// microphone on https:// pages (and on the laptop itself), so over plain http it explains instead.
+// in the box to be read and sent with the send button; nothing is sent by voice alone. Browsers only
+// allow the microphone on https:// pages (and on the laptop itself), so over plain http it explains.
 const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 let listener = null;
 
@@ -519,28 +418,21 @@ $("mic").onclick = () => {
 
 // ---- fitting above the phone keyboard ----------------------------------------------------------
 // The viewport setting asks the browser to shrink the page when the keyboard opens; where a browser
-// does not, the visible area (visualViewport) is followed by hand. With the keyboard open, a
-// question shrinks to its buttons (style.css, body.kb-open).
-let tallest = 0;
+// does not, the visible area (visualViewport) is followed by hand.
 function fitToKeyboard() {
   const view = window.visualViewport;
-  if (!view) return;
-  tallest = Math.max(tallest, view.height);
   $("viewer").style.height = `${view.height}px`;
   $("viewer").style.top = `${view.offsetTop}px`;
-  document.body.classList.toggle("kb-open", view.height < tallest - 150);
-  if (!$("viewer").hidden && mode === "chat") scrollChatIfFollowing();
 }
 if (window.visualViewport) {
   window.visualViewport.addEventListener("resize", fitToKeyboard);
   window.visualViewport.addEventListener("scroll", fitToKeyboard);
-  window.addEventListener("orientationchange", () => { tallest = 0; });
   fitToKeyboard();
 }
 
 // The laptop item in ⋯: "Open on laptop" when no terminal window shows this session, "Close on
 // laptop" when one does. Closing detaches the windows; the session keeps running. Hidden while
-// frozen, because a paused tmux cannot say how many windows it has (windows is then null).
+// paused, because a paused tmux cannot say how many windows it has (windows is then null).
 function showLaptopButton(windows) {
   const button = $("v-laptop");
   button.hidden = windows === null || windows === undefined;
@@ -564,8 +456,9 @@ $("v-laptop").onclick = async () => {
 // ---- the live terminal (docs/decisions/0018) -------------------------------------------------
 // xterm.js draws a real terminal in #live. Its bytes come from `tmux attach` for this session,
 // which the server runs in a pty and relays over a WebSocket (src/ollagi/terminal.py). xterm.js is
-// about 350 KB, so it is only loaded the first time Live is pressed.
-let live = null;  // { term, socket, fit, observer } while a live terminal is open
+// about 350 KB, so it is only loaded the first time a session opens.
+let live = null;  // { term, socket, observer } while a live terminal is open
+let starting = false;
 
 async function loadXterm() {
   if (!document.querySelector('link[href="/static/xterm.css"]')) {
@@ -577,65 +470,75 @@ async function loadXterm() {
 
 async function startLive() {
   const name = current;
-  const { Terminal, FitAddon } = await loadXterm();
-  if (current !== name || live) return;  // the viewer moved on while xterm.js was loading
-  const styles = getComputedStyle(document.documentElement);
-  const term = new Terminal({
-    fontFamily: styles.getPropertyValue("--mono") || "monospace",
-    fontSize: window.innerWidth < 600 ? 11 : 13,
-    cursorBlink: true,
-    theme: { background: styles.getPropertyValue("--screen-bg").trim(), foreground: styles.getPropertyValue("--screen-text").trim() },
-  });
-  const fitter = new FitAddon();
-  term.loadAddon(fitter);
-  $("screen").hidden = true;
-  $("live").hidden = false;
-  term.open($("live"));
-  fitter.fit();
+  starting = true;
+  try {
+    const { Terminal, FitAddon } = await loadXterm();
+    if (current !== name || live) return;  // the viewer moved on while xterm.js was loading
+    const styles = getComputedStyle(document.documentElement);
+    const term = new Terminal({
+      fontFamily: styles.getPropertyValue("--mono") || "monospace",
+      fontSize: window.innerWidth < 600 ? 11 : 13,
+      cursorBlink: true,
+      theme: { background: styles.getPropertyValue("--screen-bg").trim(), foreground: styles.getPropertyValue("--screen-text").trim() },
+    });
+    const fitter = new FitAddon();
+    term.loadAddon(fitter);
+    $("screen").hidden = true;
+    $("live").hidden = false;
+    term.open($("live"));
+    fitter.fit();
 
-  const scheme = location.protocol === "https:" ? "wss" : "ws";
-  const socket = new WebSocket(`${scheme}://${location.host}/api/sessions/${name}/terminal?rows=${term.rows}&cols=${term.cols}`);
-  socket.binaryType = "arraybuffer";
-  const send = (message) => { if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message)); };
-  socket.onmessage = (event) => term.write(new Uint8Array(event.data));
-  socket.onclose = (event) => {
-    // Shown in the terminal itself; Live goes back to the plain view on the next press.
-    term.write(`\r\n\x1b[2m[terminal closed${event.reason ? ": " + event.reason : ""}]\x1b[0m\r\n`);
-    if (live && live.socket === socket) live.closed = true;
-    $("v-live").classList.remove("on");
-  };
-  term.onData((data) => send({ type: "input", data }));
-  term.onResize(({ rows, cols }) => send({ type: "resize", rows, cols }));
+    const scheme = location.protocol === "https:" ? "wss" : "ws";
+    const socket = new WebSocket(`${scheme}://${location.host}/api/sessions/${name}/terminal?rows=${term.rows}&cols=${term.cols}`);
+    socket.binaryType = "arraybuffer";
+    const send = (message) => { if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message)); };
+    socket.onmessage = (event) => term.write(new Uint8Array(event.data));
+    socket.onclose = () => {
+      // Closed by the other side (the session ended, or the server restarted): show the copy instead.
+      if (live && live.socket === socket) { liveEnded = name; stopLive(); }
+    };
+    term.onData((data) => send({ type: "input", data }));
+    term.onResize(({ rows, cols }) => send({ type: "resize", rows, cols }));
 
-  // Rotating the phone or opening the keyboard changes the box; fit the terminal to it again.
-  const observer = new ResizeObserver(() => fitter.fit());
-  observer.observe($("live"));
-  live = { term, socket, observer, fit: () => fitter.fit(), closed: false };
-  $("v-live").classList.add("on");
-  pollViewer();
-  term.focus();
+    // Rotating the phone or opening the keyboard changes the box; fit the terminal to it again.
+    const observer = new ResizeObserver(() => fitter.fit());
+    observer.observe($("live"));
+    live = { term, socket, observer };
+    $("v-live").textContent = "Show a copy of the screen";
+    pollViewer();
+  } finally {
+    starting = false;
+  }
 }
 
 function stopLive() {
   if (!live) return;
-  live.observer.disconnect();
-  live.socket.close();  // the server hangs up `tmux attach`; the session keeps running
-  live.term.dispose();
+  const was = live;
   live = null;
+  was.observer.disconnect();
+  was.socket.close();  // the server hangs up `tmux attach`; the session keeps running
+  was.term.dispose();
   $("live").hidden = true;
   $("screen").hidden = false;
-  $("v-live").classList.remove("on");
-  lastText = "";  // redraw the plain view at once
+  lastText = "";  // draw the copy at once
   if (current) { refreshViewer(); pollViewer(); }
 }
 
 $("v-live").onclick = () => {
-  if (live) stopLive();
-  else startLive().catch((error) => alert(`Live terminal: ${error.message}`));
+  $("v-menu").hidden = true;
+  viewMode = live ? "copy" : "live";
+  try { localStorage.setItem("ollagi.view", viewMode); } catch { /* private window: not remembered */ }
+  liveEnded = null;
+  if (live) stopLive(); else refreshViewer();
 };
 
 $("v-pause").onclick = async () => { $("v-menu").hidden = true; await api(`/api/sessions/${current}/freeze`, {}); refreshViewer(); };
-$("v-resume").onclick = async () => { await api(`/api/sessions/${current}/thaw`, {}); lastText = ""; setTimeout(refreshViewer, 300); };
+$("v-resume").onclick = async () => {
+  await api(`/api/sessions/${current}/thaw`, {});
+  lastText = "";
+  liveEnded = null;
+  setTimeout(refreshViewer, 300);
+};
 $("v-stop").onclick = async () => {
   $("v-menu").hidden = true;
   if (!confirm(`Stop ${current}? The Claude session ends; work saved to disk stays.`)) return;
@@ -820,8 +723,8 @@ async function refreshSystem() {
   projects = s.projects;
   fillProjects();
   const used = 1 - s.memory.available / s.memory.total;
-  $("chip-memory-text").textContent = `MEM ${(s.memory.available / GiB).toFixed(1)}G free`;
-  $("chip-cpu").textContent = `CPU ${s.load.one_minute.toFixed(1)}/${s.load.cpus}`;
+  $("chip-memory-text").textContent = `${(s.memory.available / GiB).toFixed(1)} GiB free`;
+  $("chip-cpu").textContent = ` · load ${s.load.one_minute.toFixed(1)}`;
   $("mem-text").textContent = `${gib(s.memory.available)} of ${gib(s.memory.total)}`;
   $("mem-bar").style.width = (used * 100).toFixed(0) + "%";
   $("pressure").textContent = s.pressure ? s.pressure.some_avg10.toFixed(1) + "%" : "not available";
