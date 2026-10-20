@@ -13,6 +13,10 @@ Everything has a default, so ollagi works with no file at all. Example file:
     [slack]
     drafts_to = "#my-notes"    # optional: queue events become DRAFTS here; nothing is sent without me
 
+    [desktop]                  # windows on this laptop (docs/decisions/0017); every key is optional
+    open_on_start = true       # a session started from the page or `ollagi start` opens a window
+    terminal = ["foot", "-T", "ollagi: {name}"]   # {name} becomes the session name
+
     [watcher]                  # the RAM watcher (docs/decisions/0008); every key is optional
     action = "freeze"          # "freeze", "stop" or "warn"
     red_free_gib = 0.75
@@ -30,6 +34,7 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from ollagi.desktop import Settings as DesktopSettings
 from ollagi.watcher import ACTIONS, GIB, Settings as WatcherSettings
 
 DEFAULT_PATH = Path.home() / ".config" / "ollagi" / "config.toml"
@@ -49,6 +54,7 @@ class Config:
     projects: tuple[Project, ...] = field(default_factory=tuple)
     watcher: WatcherSettings = field(default_factory=WatcherSettings)
     slack_drafts_to: str | None = None
+    desktop: DesktopSettings = field(default_factory=DesktopSettings)
 
 
 def parse(text: str) -> Config:
@@ -60,7 +66,16 @@ def parse(text: str) -> Config:
         projects=tuple(Project(p["name"], p["directory"]) for p in data.get("projects", ())),
         watcher=parse_watcher(data.get("watcher", {})),
         slack_drafts_to=data.get("slack", {}).get("drafts_to"),
+        desktop=parse_desktop(data.get("desktop", {})),
     )
+
+
+def parse_desktop(table: dict) -> DesktopSettings:
+    default = DesktopSettings()
+    terminal = tuple(table.get("terminal", default.terminal))
+    if not terminal or not all(isinstance(part, str) and part for part in terminal):
+        raise ValueError("[desktop] terminal must be a list of words, for example [\"foot\"]")
+    return DesktopSettings(open_on_start=bool(table.get("open_on_start", default.open_on_start)), terminal=terminal)
 
 
 def parse_watcher(table: dict) -> WatcherSettings:
