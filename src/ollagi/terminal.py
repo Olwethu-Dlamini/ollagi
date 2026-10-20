@@ -19,6 +19,7 @@ Its environment carries OLLAGI_VIEWER=browser, so desktop.py does not count it a
 import asyncio
 import fcntl
 import json
+import math
 import os
 import select
 import struct
@@ -26,6 +27,8 @@ import subprocess
 import termios
 from collections.abc import Sequence
 from dataclasses import dataclass
+
+import anyio
 
 from ollagi import sessions
 
@@ -139,28 +142,37 @@ async def relay(websocket, term: Terminal) -> None:
     """Pass bytes between the browser and the program until either side ends.
 
     The event loop watches the pty and calls `readable` when there is output. Output goes through a
-    queue to a single sender, so it reaches the browser in the order it was printed."""
+    stream to a single sender, so it reaches the browser in the order it was printed. The two
+    directions run in one anyio task group (the same library Starlette uses), so when one ends, the
+    other is cancelled cleanly; closing the pty is shielded so it happens even then."""
     loop = asyncio.get_running_loop()
-    outgoing: asyncio.Queue = asyncio.Queue()
+    outgoing, output = anyio.create_memory_object_stream(math.inf)
+    program_ended = False
 
     def readable():
         try:
             data = term.read()
         except EOFError:
             loop.remove_reader(term.fd)
-            outgoing.put_nowait(None)  # the program ended
+            outgoing.send_nowait(None)  # the program ended
             return
         if data:
-            outgoing.put_nowait(data)
+            outgoing.send_nowait(data)
 
-    async def send_output():
-        while (data := await outgoing.get()) is not None:
+    async def send_output(group):
+        nonlocal program_ended
+        async for data in output:
+            if data is None:
+                break
             await websocket.send_bytes(data)
+        program_ended = True
+        group.cancel_scope.cancel()
 
-    async def receive_input():
+    async def receive_input(group):
         while True:
             message = await websocket.receive()
             if message["type"] == "websocket.disconnect":
+                group.cancel_scope.cancel()
                 return
             try:
                 parsed = parse(message.get("text") or "")
@@ -172,18 +184,13 @@ async def relay(websocket, term: Terminal) -> None:
                 term.resize(parsed.rows, parsed.cols)
 
     loop.add_reader(term.fd, readable)
-    sending = asyncio.create_task(send_output())
-    receiving = asyncio.create_task(receive_input())
     try:
-        done, _ = await asyncio.wait({sending, receiving}, return_when=asyncio.FIRST_COMPLETED)
+        async with outgoing, output, anyio.create_task_group() as group:
+            group.start_soon(send_output, group)
+            group.start_soon(receive_input, group)
     finally:
         loop.remove_reader(term.fd)
-        for task in (sending, receiving):
-            task.cancel()
-        await asyncio.gather(sending, receiving, return_exceptions=True)
-        await asyncio.to_thread(term.close)
-    if sending in done:  # the program ended (tmux detached or the session stopped): tell the page
-        try:
-            await websocket.close(code=1000, reason="the terminal ended")
-        except RuntimeError:
-            pass  # already closed
+        with anyio.CancelScope(shield=True):
+            await anyio.to_thread.run_sync(term.close)
+    if program_ended:  # tmux detached or the session stopped: tell the page
+        await websocket.close(code=1000, reason="the terminal ended")

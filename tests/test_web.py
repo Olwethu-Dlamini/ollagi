@@ -167,13 +167,28 @@ class FakeWindows:
         return closed
 
 
-def client(fake_sessions, available_gib=8.0, jira=None, outbox=None, outside_api=None, windows=None, **config):
+class CatTerminals:
+    """Opens `cat` in a real pty instead of `tmux attach`, and remembers what was asked for."""
+
+    def __init__(self):
+        self.opened = []
+
+    def __call__(self, name, rows, cols):
+        from ollagi.terminal import Terminal
+
+        self.opened.append((name, rows, cols))
+        return Terminal(["cat"], rows, cols)
+
+
+def client(fake_sessions, available_gib=8.0, jira=None, outbox=None, outside_api=None, windows=None, terminals=None,
+           **config):
     from ollagi.web import create_app
 
     cfg = Config(projects=(Project("simedia", "/work/DATA!"),), **config)
     app = create_app(cfg, machine=machine(available_gib), sessions_api=fake_sessions, queue_store=temp_store(),
                      jira_client=jira or FakeJira(), outbox=outbox or temp_outbox(), outside_api=outside_api or FakeOutside(),
-                     desktop_api=windows if windows is not None else FakeWindows())
+                     desktop_api=windows if windows is not None else FakeWindows(),
+                     open_terminal=terminals if terminals is not None else CatTerminals())
     return TestClient(app, base_url="http://127.0.0.1:8765")
 
 
@@ -455,3 +470,64 @@ def test_a_frozen_session_is_not_asked_for_its_windows(fake_sessions):
     c = client(fake_sessions, windows=windows)
     assert c.get("/api/sessions/demo/screen").json()["windows"] is None
     assert windows.counted == []
+
+
+# The live terminal (docs/decisions/0018).
+
+PAGE = {"origin": "http://127.0.0.1:8765"}
+WS = "ws://127.0.0.1:8765/api/sessions"  # TestClient would otherwise say "testserver", an unknown host
+
+
+def test_a_live_terminal_relays_typing_and_output(fake_sessions):
+    import json
+
+    terminals = CatTerminals()
+    with client(fake_sessions, terminals=terminals).websocket_connect(
+            f"{WS}/demo/terminal?rows=30&cols=90", headers=PAGE) as ws:
+        ws.send_text(json.dumps({"type": "input", "data": "hello\n"}))
+        seen = b""
+        while b"hello" not in seen:
+            seen += ws.receive_bytes()
+    assert terminals.opened == [("demo", 30, 90)]
+
+
+def refused_with(c, url, headers):
+    from starlette.websockets import WebSocketDisconnect
+
+    with pytest.raises(WebSocketDisconnect) as refused:
+        with c.websocket_connect(url, headers=headers):
+            pass
+    return refused.value.code
+
+
+def test_another_website_cannot_open_a_terminal(fake_sessions):
+    terminals = CatTerminals()
+    c = client(fake_sessions, terminals=terminals)
+    assert refused_with(c, f"{WS}/demo/terminal", {"origin": "https://evil.example"}) == 4403
+    assert refused_with(c, f"{WS}/demo/terminal", {}) == 4403
+    assert terminals.opened == []
+
+
+def test_no_terminal_for_an_unknown_or_frozen_session_or_an_odd_size(fake_sessions):
+    terminals = CatTerminals()
+    c = client(fake_sessions, terminals=terminals)
+    assert refused_with(c, f"{WS}/nope/terminal", PAGE) == 4404
+    assert refused_with(c, f"{WS}/demo/terminal?rows=0&cols=80", PAGE) == 4400
+    fake_sessions.frozen.add("demo")
+    assert refused_with(c, f"{WS}/demo/terminal", PAGE) == 4409
+    assert terminals.opened == []
+
+
+def test_the_page_is_told_when_the_terminal_ends(fake_sessions):
+    from starlette.websockets import WebSocketDisconnect
+
+    from ollagi.terminal import Terminal
+
+    def ending(name, rows, cols):
+        return Terminal(["sh", "-c", "echo bye"], rows, cols)
+
+    with client(fake_sessions, terminals=ending).websocket_connect(f"{WS}/demo/terminal", headers=PAGE) as ws:
+        with pytest.raises(WebSocketDisconnect) as ended:
+            while True:
+                ws.receive_bytes()
+    assert ended.value.code == 1000

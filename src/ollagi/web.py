@@ -25,6 +25,7 @@
     POST /api/slack/drafts/{id}/edit | /preview | /discard
     POST /api/slack/drafts/{id}/send    send ONE draft    {"confirmed_text"}, which must equal its text
     GET  /qr.svg                        the phone address as a QR code
+    WS   /api/sessions/{name}/terminal  a live terminal for the session (?rows=&cols=)
 
 `create_app` receives the machine readers and the sessions module as arguments. The real server
 passes the real ones; tests pass fakes, so the API is tested without touching this laptop.
@@ -38,13 +39,13 @@ from dataclasses import asdict
 from pathlib import Path
 from types import SimpleNamespace
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, WebSocket
 from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel
 
 from collections import deque
 
-from ollagi import access, claude_screen, desktop, grouping, outside, queue as queueing, sessions, slack_outbox, system, watcher as watching
+from ollagi import access, claude_screen, desktop, grouping, outside, queue as queueing, sessions, slack_outbox, system, terminal, watcher as watching
 from ollagi.budget import Limits, how_many_can_start
 from ollagi.config import Config
 from ollagi.processes import find_sessions, read_processes
@@ -112,11 +113,13 @@ DRAFT_WORTHY = (" done", "waiting for you", "usage limit", "failed")
 
 def create_app(config: Config, machine=None, sessions_api=sessions, run_watcher=False, phone_url=None,
                queue_store=None, run_queue=False, command_for=None, results_dir=None, jira_client=None,
-               outbox=None, outside_api=outside, desktop_api=None) -> FastAPI:
+               outbox=None, outside_api=outside, desktop_api=None, open_terminal=None) -> FastAPI:
     machine = machine or real_machine()
     # Windows on this laptop for a session (docs/decisions/0017). Only the page's Start and the
     # open/close button use them; the overnight queue never opens one.
     laptop = desktop_api or desktop.Laptop(config.desktop)
+    # A live terminal in the browser (docs/decisions/0018): `tmux attach` in a pty. Tests pass `cat`.
+    open_terminal = open_terminal or (lambda name, rows, cols: terminal.Terminal(terminal.session_command(name), rows, cols))
     watcher = watching.Watcher(config.watcher)
     store = queue_store or queueing.Store()
     drafts = outbox or slack_outbox.Outbox()
@@ -319,6 +322,27 @@ def create_app(config: Config, machine=None, sessions_api=sessions, run_watcher=
     def close_on_desktop(name: str):
         _require_session(sessions_api, name)
         return {"closed": laptop.close(name)}
+
+    @app.websocket("/api/sessions/{name}/terminal")
+    async def live_terminal(websocket: WebSocket, name: str, rows: int = 24, cols: int = 80):
+        # The access middleware above sees HTTP requests only, so a WebSocket is checked here.
+        # Refusing before accepting answers the browser with an error instead of opening anything;
+        # the 44xx codes mirror HTTP's 403, 404, 400 and 409.
+        decision = access.check_terminal(dict(websocket.headers), config.allowed_login, config.allowed_hosts)
+        if not decision.allowed:
+            return await websocket.close(code=4403, reason=decision.reason)
+        try:
+            known = name in sessions_api.names()
+        except ValueError:
+            known = False
+        if not known:
+            return await websocket.close(code=4404, reason=f"no session called {name}")
+        if not terminal.valid_size(rows, cols):
+            return await websocket.close(code=4400, reason="terminal size out of range")
+        if sessions_api.scope_state(name)[0]:
+            return await websocket.close(code=4409, reason=f"{name} is frozen; resume it first")
+        await websocket.accept()
+        await terminal.relay(websocket, open_terminal(name, rows, cols))
 
     @app.post("/api/sessions/{name}/send")
     def send(name: str, body: SendRequest):
