@@ -65,6 +65,10 @@ def list_sessions(claude_home: Path = CLAUDE_HOME, proc: Path = Path("/proc")) -
         # recorded with the process's real one. Different means this file is stale.
         if data.get("kind") != "interactive" or process_start(pid, proc) != str(data.get("procStart")):
             continue
+        # `claude -p` (a one-shot answer, such as ollagi's summaries) is marked "interactive" too;
+        # only its entrypoint, "sdk-cli", tells it apart from a session in a terminal.
+        if data.get("entrypoint") == "sdk-cli":
+            continue
         found.append(OutsideSession(
             pid=pid,
             session_id=str(data.get("sessionId", "")),

@@ -59,6 +59,17 @@ def test_running_sessions_are_listed_and_stale_files_skipped(tmp_path):
     assert (s.pid, s.session_id, s.name, s.status, s.started) == (me, "abc-123", "demo-1", "idle", 1.0)
 
 
+def test_a_one_shot_claude_p_run_is_not_a_session_started_in_a_terminal(tmp_path):
+    # `claude -p` (ollagi's summaries, decision 0019) also writes a session file marked
+    # "interactive", but its entrypoint says "sdk-cli"; a terminal session says "cli".
+    me = os.getpid()
+    (tmp_path / "sessions").mkdir()
+    (tmp_path / "sessions" / f"{me}.json").write_text(json.dumps({
+        "pid": me, "sessionId": "p-1", "kind": "interactive", "entrypoint": "sdk-cli",
+        "procStart": process_start(me)}))
+    assert list_sessions(claude_home=tmp_path) == []
+
+
 def test_a_conversation_file_is_found_by_its_id_in_any_project_folder(tmp_path):
     folder = tmp_path / "projects" / "-work-demo"
     folder.mkdir(parents=True)
