@@ -134,14 +134,17 @@ class FakeOutside:
     def read_tail(self, path):
         return ['{"type": "user", "message": {"content": "hello"}}']
 
-    def parse_conversation(self, lines):
+    def parse_conversation(self, lines, limit=40):
         from ollagi.outside import parse_conversation
 
-        return parse_conversation(lines)
+        return parse_conversation(lines, limit=limit)
 
     def end_process(self, pid):
         self.ended.append(pid)
         return True
+
+    def session_id_of(self, pid):
+        return {4242: "conv-1"}.get(pid)  # FakeSessions' "demo" runs Claude as pid 4242
 
 
 class FakeWindows:
@@ -597,3 +600,29 @@ def test_a_failed_summary_says_why(fake_sessions):
     response = c.post("/api/sessions/demo/summary", headers=CHANGE)
     assert response.status_code == 502
     assert "usage limit" in response.json()["detail"]
+
+
+
+# The chat view (docs/decisions/0020) reads the session's conversation from Claude's own files.
+
+def test_a_sessions_conversation_is_read_from_claudes_files(fake_sessions):
+    data = client(fake_sessions).get("/api/sessions/demo/conversation").json()
+    assert data["claude"] is True
+    assert data["items"] == [{"role": "you", "text": "hello"}]
+
+
+def test_a_session_without_claude_has_no_conversation(fake_sessions):
+    fake_sessions.running["shell"] = "/tmp"
+    fake_sessions.info = lambda name: SessionInfo(name, "/tmp", 777, 1_000_000, True, MIB, MIB)
+    data = client(fake_sessions).get("/api/sessions/shell/conversation").json()
+    assert data == {"claude": False, "frozen": False, "title": None, "items": []}
+
+
+def test_a_frozen_sessions_conversation_is_not_looked_up(fake_sessions):
+    fake_sessions.frozen.add("demo")
+    data = client(fake_sessions).get("/api/sessions/demo/conversation").json()
+    assert data["frozen"] is True and data["items"] == []
+
+
+def test_no_conversation_for_an_unknown_session(fake_sessions):
+    assert client(fake_sessions).get("/api/sessions/nope/conversation").status_code == 404

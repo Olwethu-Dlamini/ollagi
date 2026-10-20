@@ -4,6 +4,7 @@
     GET  /api/system                    memory, pressure, load, disks, heavy processes, Claude sessions
     GET  /api/sessions                  ollagi sessions with their state and memory
     GET  /api/sessions/{name}/screen    the end of a session's screen, as text
+    GET  /api/sessions/{name}/conversation   its Claude conversation, from Claude's own files (read only)
     POST /api/sessions                  start a session   {"name", "directory", "force"}
     POST /api/sessions/{name}/send      type into it      {"text"} or {"key"}
     POST /api/sessions/{name}/stop      stop it
@@ -300,6 +301,22 @@ def create_app(config: Config, machine=None, sessions_api=sessions, run_watcher=
             "question": reading.question, "options": [asdict(o) for o in reading.options],
             "windows": laptop.count(name),
         }
+
+    @app.get("/api/sessions/{name}/conversation")
+    def conversation(name: str):
+        """The chat view (docs/decisions/0020). The Claude in a session is the program tmux started,
+        so the pane's process id leads to Claude's session file, and that to the conversation."""
+        _require_session(sessions_api, name)
+        if sessions_api.scope_state(name)[0]:
+            # A frozen session's tmux cannot say which process it runs.
+            return {"claude": None, "frozen": True, "title": None, "items": []}
+        session_id = outside_api.session_id_of(sessions_api.info(name).pane_pid)
+        path = outside_api.transcript_path(session_id) if session_id else None
+        if path is None:
+            return {"claude": False, "frozen": False, "title": None, "items": []}
+        title, items = outside_api.parse_conversation(outside_api.read_tail(path), limit=80)
+        return {"claude": True, "frozen": False, "title": title,
+                "items": [{"role": i.role, "text": i.text[:6000]} for i in items]}
 
     @app.post("/api/sessions")
     def start_session(body: StartRequest):

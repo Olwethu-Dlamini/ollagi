@@ -113,6 +113,18 @@ def list_sessions(claude_home: Path = CLAUDE_HOME, proc: Path = Path("/proc")) -
     return found
 
 
+def session_id_of(pid: int, claude_home: Path = CLAUDE_HOME, proc: Path = Path("/proc")) -> str | None:
+    """The conversation id of the Claude running as `pid`, from its session file; None when the
+    process is not a Claude (no file) or the file was left by an earlier process with that pid."""
+    try:
+        data = json.loads((claude_home / "sessions" / f"{pid}.json").read_text())
+    except (OSError, ValueError):
+        return None
+    if process_start(pid, proc) != str(data.get("procStart")):
+        return None
+    return str(data.get("sessionId") or "") or None
+
+
 def transcript_path(session_id: str, claude_home: Path = CLAUDE_HOME) -> Path | None:
     if not session_id or "/" in session_id:
         return None
