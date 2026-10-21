@@ -48,7 +48,10 @@ TTL_SECONDS = 6 * 3600
 MAX_MESSAGE = 3900
 # Where real browsers' push services live. A subscription may only point at one of these, so a
 # made-up subscription cannot turn this server into something that sends requests anywhere else.
-PUSH_SERVICES = ("fcm.googleapis.com", "push.services.mozilla.com", "push.apple.com", "notify.windows.com")
+# jmt17.google.com is where Chromium builds without Google's API keys subscribe (Arch's, for one);
+# Chrome itself, on Android too, uses fcm.googleapis.com.
+PUSH_SERVICES = ("fcm.googleapis.com", "jmt17.google.com", "push.services.mozilla.com", "push.apple.com",
+                 "notify.windows.com")
 
 
 @dataclass(frozen=True)

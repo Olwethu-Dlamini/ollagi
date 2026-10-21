@@ -110,6 +110,15 @@
     <ul class="events" id="watch-events"></ul>
   </section>
 
+  <!-- Notifications on this device (docs/decisions/0024). -->
+  <section class="card">
+    <h2>Notifications</h2>
+    <div class="kv"><span id="push-status">…</span><button class="plain" id="push-toggle" hidden></button></div>
+    <p class="muted">When a session needs you or finishes, when a queue task ends, and when the RAM watcher acts.</p>
+    <div class="kv" id="push-test-row" hidden><span class="muted" id="push-phones"></span><button class="plain" id="push-test">Send a test</button></div>
+    <ul class="events" id="push-events"></ul>
+  </section>
+
   <section class="card">
     <h2>Disks</h2>
     <table id="disks"></table>

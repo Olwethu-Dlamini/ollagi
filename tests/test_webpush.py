@@ -80,6 +80,8 @@ def test_the_key_is_made_once_kept_private_and_read_back(tmp_path):
 
 @pytest.mark.parametrize("url, allowed", [
     ("https://fcm.googleapis.com/fcm/send/abc", True),            # Chrome on Android
+    ("https://jmt17.google.com/fcm/send/abc", True),              # Chromium without Google's keys
+    ("https://mail.google.com/x", False),                         # Google, but not its push service
     ("https://updates.push.services.mozilla.com/wpush/v2/x", True),  # Firefox
     ("https://web.push.apple.com/QGx", True),                     # Safari
     ("http://fcm.googleapis.com/fcm/send/abc", False),            # not https

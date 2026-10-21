@@ -91,6 +91,7 @@ def test_subscriptions_are_kept_once_per_endpoint(tmp_path):
     assert store.all() == [sub]
     store.remove(sub.endpoint)
     assert store.all() == []
+    assert (tmp_path / "push.db").stat().st_mode & 0o777 == 0o600
 
 
 def test_subscribers_refuse_what_is_not_a_browser_subscription(tmp_path):

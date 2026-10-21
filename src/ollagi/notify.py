@@ -115,6 +115,7 @@ class Subscribers:
         self.lock = threading.RLock()
         self.db = sqlite3.connect(path, check_same_thread=False)
         self.db.executescript(SCHEMA)
+        path.chmod(0o600)  # each row holds a phone's secret; only my user reads it
 
     def add(self, sub: webpush.Subscription) -> None:
         if not webpush.known_push_service(sub.endpoint):

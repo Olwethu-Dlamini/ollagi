@@ -54,6 +54,7 @@ function showView(name) {
   for (const view of ["sessions", "queue", "system"]) $(`view-${view}`).hidden = name !== view;
   $("new-open").hidden = name !== "sessions";
   if (name === "queue") { refreshQueue(); refreshDrafts(); }
+  if (name === "system") refreshPush().catch(() => {});
 }
 for (const b of document.querySelectorAll(".tabs button")) b.onclick = () => showView(b.dataset.view);
 $("chip-memory").onclick = () => showView("system");
@@ -770,12 +771,108 @@ async function refreshSessions() {
   renderSessions();
 }
 
+// ---- notifications on this device (docs/decisions/0024) ------------------------------------------
+// The browser subscribes at its push service with the server's public key; the server keeps the
+// subscription and sends to it (src/ollagi/notify.py). Asking for permission needs a tap, so
+// nothing happens until "Turn on" is pressed.
+const canPush = "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+let pushKey = null;
+
+function fromBase64Url(text) {
+  const plain = atob(text.replace(/-/g, "+").replace(/_/g, "/"));
+  return Uint8Array.from(plain, (c) => c.charCodeAt(0));
+}
+
+// This browser's subscription, if it was made with the server's current key.
+async function currentSubscription() {
+  const sub = await (await navigator.serviceWorker.ready).pushManager.getSubscription();
+  if (!sub || !pushKey) return null;
+  const made = new Uint8Array(sub.options.applicationServerKey || []);
+  const wanted = fromBase64Url(pushKey);
+  return made.length === wanted.length && made.every((b, i) => b === wanted[i]) ? sub : null;
+}
+
+async function refreshPush(firstTime = false) {
+  const state = await api("/api/push");
+  pushKey = state.public_key;
+  const toggle = $("push-toggle");
+  toggle.hidden = true;
+  if (!isSecureContext) {
+    $("push-status").textContent = "Needs the https address";
+  } else if (!canPush) {
+    $("push-status").textContent = "This browser cannot show them";
+  } else if (Notification.permission === "denied") {
+    $("push-status").textContent = "Blocked in this browser's site settings";
+  } else {
+    const sub = await currentSubscription();
+    // The server may have lost it (a new database, a phone dropped after an error): give it again.
+    if (sub && firstTime) await api("/api/push/subscribe", sub.toJSON());
+    $("push-status").textContent = sub ? "On for this device" : "Off for this device";
+    toggle.textContent = sub ? "Turn off" : "Turn on";
+    toggle.hidden = false;
+  }
+  $("push-test-row").hidden = state.phones === 0;
+  $("push-phones").textContent = `${state.phones} device${state.phones === 1 ? "" : "s"} on`;
+  $("push-events").replaceChildren(...state.events.slice(-5).reverse().map((e) =>
+    el("li", new Date(e.time * 1000).toLocaleTimeString() + "  " + e.text)));
+}
+
+$("push-toggle").onclick = async () => {
+  const toggle = $("push-toggle");
+  toggle.disabled = true;
+  try {
+    const sub = await currentSubscription();
+    if (sub) {
+      await api("/api/push/unsubscribe", { endpoint: sub.endpoint });
+      await sub.unsubscribe();
+    } else if (await Notification.requestPermission() === "granted") {
+      const registration = await navigator.serviceWorker.ready;
+      // One made with an older key would be refused by the push service: replace it.
+      await (await registration.pushManager.getSubscription())?.unsubscribe();
+      const fresh = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: fromBase64Url(pushKey) });
+      // If the server refuses it, undo the browser's half too, or this device would say "On" for nothing.
+      await api("/api/push/subscribe", fresh.toJSON()).catch(async (error) => { await fresh.unsubscribe(); throw error; });
+    }
+  } catch (error) {
+    alert("Notifications: " + error.message);
+  } finally {
+    toggle.disabled = false;
+    refreshPush();
+  }
+};
+
+$("push-test").onclick = async () => {
+  try {
+    const result = await api("/api/push/test", {});
+    if (result.failed.length) alert("Not sent: " + result.failed.join("; "));
+  } catch (error) {
+    alert(error.message);
+  }
+  refreshPush();
+};
+
+// A notification's address says what to show: /?session=NAME or /?view=queue. It arrives as the
+// page's address when the page was closed, or as a message from the service worker when it was open.
+function follow(url) {
+  const params = new URL(url, location.origin).searchParams;
+  if (params.get("session")) openViewer(params.get("session"));
+  else if (params.get("view")) { if (current) closeViewer(); showView(params.get("view")); }
+}
+if (location.search) {
+  follow(location.href);
+  history.replaceState(null, "", "/");
+}
+navigator.serviceWorker?.addEventListener("message", (event) => {
+  if (event.data?.type === "open") follow(event.data.url);
+});
+
 // ---- keep everything fresh -----------------------------------------------------------------------
 async function tick() {
   try {
     if (!whoami) whoami = (await api("/api/whoami")).login;
     const jobs = [refreshSystem(), refreshSessions(), refreshWatcher()];
     if (!$("view-queue").hidden) jobs.push(refreshQueue());
+    if (!$("view-system").hidden) jobs.push(refreshPush());
     await Promise.all(jobs);
     renderSessions();  // once more, now that every list is in
   } catch (error) {
@@ -788,5 +885,7 @@ setInterval(tick, 4000);
 // ---- the service worker: lets the phone install this page as an app (docs/decisions/0023) ----
 // Browsers only allow one on a secure page (https, or 127.0.0.1 on the laptop).
 if ("serviceWorker" in navigator) {
-  navigator.serviceWorker.register("/sw.js").catch((error) => console.warn("service worker:", error));
+  navigator.serviceWorker.register("/sw.js")
+    .then(() => refreshPush(true))
+    .catch((error) => console.warn("service worker:", error));
 }
