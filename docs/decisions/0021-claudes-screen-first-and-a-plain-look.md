@@ -61,7 +61,7 @@ queue off) with a throwaway Claude session on Haiku with no settings (`chattest`
 - no page errors; 208 unit tests pass;
 - the restarted service serves the new page; my own sessions were left as they were (not opened).
 
-Not yet checked: on my phone.
+On my phone through the tailnet, 2026-10-21: it works and looks better.
 
 ## Sources
 
