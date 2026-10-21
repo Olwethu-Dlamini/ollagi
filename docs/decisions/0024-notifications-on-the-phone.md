@@ -80,8 +80,15 @@ page, or opens the page.
   at `jmt17.google.com`, which the first allow-list refused; and after a refusal the card still
   said "On", because the browser kept its half of the subscription.
 
-Not yet checked: on my phone (Turn on, a real "needs you", a tap opening the session), and the
+On my phone, 2026-10-21: the card first stayed at "…", because Chrome reused its saved copy of the
+old app.js (the page's files had no Cache-Control). Fixed in 32b04f3: every page file is sent with
+`no-cache` and an ETag, unchanged files answer 304, and app.js is loaded once as `app.js?v=2`. After
+that, Turn on registered the phone (Google's `fcm.googleapis.com`) and the test notification arrived.
+
+Not yet checked: a real "needs you" from a Claude session on the phone, a tap opening it, and the
 watcher and queue notices in real use.
+
+The full guide is `docs/guides/phone-app-and-notifications.md`.
 
 ## Sources
 

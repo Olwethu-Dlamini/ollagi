@@ -41,7 +41,7 @@ watcher, no queue): Chromium read the manifest with no errors, `Page.getInstalla
 returned none, the worker was active and controlled the page, no page errors. (In an incognito
 context Chromium answers `in-incognito`, which is about the test browser, not the page.)
 
-Not yet checked: installing it on my phone.
+On my phone, 2026-10-21: installed from Chrome and opened from its icon.
 
 ## Sources
 

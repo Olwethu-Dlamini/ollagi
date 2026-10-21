@@ -35,8 +35,8 @@ Early. Built in small steps, one idea per commit, so every part can be read and 
 | 9 | Summary: a session's screen summarised by Haiku, only on request | done |
 | 9a | Sessions open in Claude's own live screen; a plain look; voice into the message box; fits above the keyboard | done |
 | 9b | HTTPS for the phone: the page on https://, voice works | done |
-| 9c | Installable app on the phone | next |
-| 9d | Phone notifications through Web Push: needs you, finished, usage limit | next |
+| 9c | Installable app on the phone | done |
+| 9d | Phone notifications through Web Push: needs you, finished, queue, RAM watcher | done |
 
 ## Try it
 
@@ -72,6 +72,8 @@ start another? yes: 1 more can start
 
 ## How to read this repo
 
+- `docs/guides/`: one full guide per feature: what it does, setup, how it works end to end, tests, troubleshooting, questions people ask.
+  [Phone app and notifications](docs/guides/phone-app-and-notifications.md).
 - `docs/decisions/`: one short note per choice: what was decided, why, and what else was considered. Read these first.
 - `docs/suggestions.md`: ideas not decided yet, with what each would change and how to undo it.
 - `docs/learning/`: the concepts the code relies on (tmux, Tailscale, `/proc/meminfo`, systemd), explained in plain words.
