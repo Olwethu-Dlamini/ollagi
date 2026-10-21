@@ -498,7 +498,14 @@ async function startLive() {
       // Closed by the other side (the session ended, or the server restarted): show the copy instead.
       if (live && live.socket === socket) { liveEnded = name; stopLive(); }
     };
-    term.onData((data) => send({ type: "input", data }));
+    const scroll = swipeToScroll(term);
+    term.onData((data) => {
+      // Scrolled back, tmux would read this key as a scroll command: go back to the live screen first.
+      // Mouse reports (the wheel events a swipe makes, "ESC [ < b;x;y M") travel here too; they are
+      // not typing and must not undo the scroll.
+      if (scroll.back && !MOUSE_REPORT.test(data)) { send({ type: "bottom" }); scroll.back = false; }
+      send({ type: "input", data });
+    });
     term.onResize(({ rows, cols }) => send({ type: "resize", rows, cols }));
 
     // Rotating the phone or opening the keyboard changes the box; fit the terminal to it again.
@@ -510,6 +517,45 @@ async function startLive() {
   } finally {
     starting = false;
   }
+}
+
+// Swipe to scroll back (docs/decisions/0025). The history is not in this terminal but in tmux on the
+// laptop, which scrolls it when it gets mouse-wheel events (tmux.conf: mouse on). xterm.js sends a
+// wheel on to tmux, but not a finger, so a vertical swipe becomes wheel events here: one per five
+// lines of finger travel, which is how far tmux scrolls for each. Swiping back down to the bottom
+// returns to the live screen. Taps and sideways moves are left to xterm.js and the page.
+const MOUSE_REPORT = /^\x1b\[<\d+;\d+;\d+[Mm]$/;
+
+function swipeToScroll(term) {
+  const surface = $("live");
+  const state = { back: false };
+  let lastY = null, travelled = 0, vertical = false;
+  const step = () => 5 * (surface.clientHeight / term.rows);
+  surface.addEventListener("touchstart", (event) => {
+    lastY = event.touches.length === 1 ? event.touches[0].clientY : null;
+    travelled = 0;
+    vertical = false;
+  }, { capture: true, passive: true });
+  surface.addEventListener("touchmove", (event) => {
+    if (lastY === null) return;
+    const touch = event.touches[0];
+    travelled += touch.clientY - lastY;
+    lastY = touch.clientY;
+    if (!vertical && Math.abs(travelled) < 8) return;  // not a swipe yet: could be a tap
+    vertical = true;
+    event.preventDefault();   // no page bounce, no pull-to-refresh
+    event.stopPropagation();  // and no scrolling of xterm.js's own (empty) history
+    while (Math.abs(travelled) >= step()) {
+      const up = travelled > 0;  // finger moving down = older lines, like any phone list
+      term.element.dispatchEvent(new WheelEvent("wheel", {
+        deltaY: up ? -100 : 100, deltaMode: 0, clientX: touch.clientX, clientY: touch.clientY,
+        bubbles: true, cancelable: true,
+      }));
+      if (up) state.back = true;
+      travelled += up ? -step() : step();
+    }
+  }, { capture: true, passive: false });
+  return state;
 }
 
 function stopLive() {
