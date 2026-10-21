@@ -208,6 +208,30 @@ def test_the_page_and_its_files_are_served_and_nothing_else(fake_sessions):
     assert c.get("/static/index.html").status_code == 404
 
 
+def test_the_page_can_be_installed_as_an_app(fake_sessions):
+    c = client(fake_sessions)
+    assert '<link rel="manifest" href="/manifest.webmanifest">' in c.get("/").text
+    response = c.get("/manifest.webmanifest")
+    assert response.headers["content-type"].startswith("application/manifest+json")
+    manifest = response.json()
+    assert manifest["start_url"] == "/" and manifest["display"] == "standalone"
+    # Android asks for a 192 and a 512 pixel icon; each one listed must be served as a PNG.
+    sizes = {icon["sizes"] for icon in manifest["icons"]}
+    assert {"192x192", "512x512"} <= sizes
+    for icon in manifest["icons"]:
+        image = c.get(icon["src"])
+        assert image.status_code == 200 and image.content.startswith(b"\x89PNG")
+
+
+def test_the_service_worker_is_served_from_the_root_and_never_cached(fake_sessions):
+    # From the root, so it covers the whole page; a worker under /static/ would only cover /static/.
+    response = client(fake_sessions).get("/sw.js")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/javascript")
+    # The browser must ask for a new worker every time, so a change reaches the phone.
+    assert response.headers["cache-control"] == "no-cache"
+
+
 def test_system_reports_memory_processes_sessions_and_projects(fake_sessions):
     data = client(fake_sessions).get("/api/system").json()
     assert data["memory"]["available"] == 8 * GIB

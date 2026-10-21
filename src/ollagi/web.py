@@ -26,6 +26,8 @@
     POST /api/slack/drafts/{id}/edit | /preview | /discard
     POST /api/slack/drafts/{id}/send    send ONE draft    {"confirmed_text"}, which must equal its text
     GET  /qr.svg                        the phone address as a QR code
+    GET  /manifest.webmanifest          what a phone needs to install the page as an app
+    GET  /sw.js                         the service worker (installing, and notifications)
     WS   /api/sessions/{name}/terminal  a live terminal for the session (?rows=&cols=)
 
 `create_app` receives the machine readers and the sessions module as arguments. The real server
@@ -200,9 +202,21 @@ def create_app(config: Config, machine=None, sessions_api=sessions, run_watcher=
     @app.get("/static/{name}")
     def static_file(name: str):
         """The page's own files. Only these names are served, so no other file can be reached."""
-        if name not in {"style.css", "app.js", "ansi.js", "xterm.mjs", "xterm-addon-fit.mjs", "xterm.css"}:
+        if name not in {"style.css", "app.js", "ansi.js", "xterm.mjs", "xterm-addon-fit.mjs", "xterm.css",
+                        "icon-192.png", "icon-512.png"}:
             raise HTTPException(404, "no such file")
         return FileResponse(STATIC / name)
+
+    @app.get("/manifest.webmanifest")
+    def manifest():
+        """Name, icons and look of the installed app (docs/decisions/0023)."""
+        return FileResponse(STATIC / "manifest.webmanifest", media_type="application/manifest+json")
+
+    @app.get("/sw.js")
+    def service_worker():
+        # Served from the root, so it covers every page of the site. no-cache: the browser checks
+        # for a new version each time instead of keeping an old one for up to a day.
+        return FileResponse(STATIC / "sw.js", media_type="text/javascript", headers={"Cache-Control": "no-cache"})
 
     @app.get("/qr.svg")
     def qr_code():

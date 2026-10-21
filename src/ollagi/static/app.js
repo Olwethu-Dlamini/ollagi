@@ -784,3 +784,9 @@ async function tick() {
 }
 tick();
 setInterval(tick, 4000);
+
+// ---- the service worker: lets the phone install this page as an app (docs/decisions/0023) ----
+// Browsers only allow one on a secure page (https, or 127.0.0.1 on the laptop).
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("/sw.js").catch((error) => console.warn("service worker:", error));
+}
