@@ -37,6 +37,7 @@ Early. Built in small steps, one idea per commit, so every part can be read and 
 | 9b | HTTPS for the phone: the page on https://, voice works | done |
 | 9c | Installable app on the phone | done |
 | 9d | Phone notifications through Web Push: needs you, finished, queue, RAM watcher | done |
+| 9e | Swipe to scroll back in a session's live terminal | done |
 
 ## Try it
 
@@ -73,7 +74,8 @@ start another? yes: 1 more can start
 ## How to read this repo
 
 - `docs/guides/`: one full guide per feature: what it does, setup, how it works end to end, tests, troubleshooting, questions people ask.
-  [Phone app and notifications](docs/guides/phone-app-and-notifications.md).
+  [Phone app and notifications](docs/guides/phone-app-and-notifications.md),
+  [Scrolling back on the phone](docs/guides/scrolling-back-on-the-phone.md).
 - `docs/decisions/`: one short note per choice: what was decided, why, and what else was considered. Read these first.
 - `docs/suggestions.md`: ideas not decided yet, with what each would change and how to undo it.
 - `docs/learning/`: the concepts the code relies on (tmux, Tailscale, `/proc/meminfo`, systemd), explained in plain words.
