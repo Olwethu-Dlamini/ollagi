@@ -178,3 +178,40 @@ same moment can break it, so every database method in `queue.py` takes a lock fi
 - When a phone keyboard opens, a browser can shrink the whole page (`interactive-widget=
   resizes-content` in the viewport tag asks for that) or only the visible part of it.
   `window.visualViewport` tells the visible part's size, so a page can fit itself above the keyboard.
+
+## Installable pages: the manifest and the service worker (decision 0023)
+
+- A *web app manifest* is a small JSON file the page links to (`<link rel="manifest">`): the app's
+  name, its icons, where it starts and whether it shows the browser bar (`display: standalone`
+  hides it). Chrome offers "Install app" once the page is secure and has a manifest with icons.
+- A *service worker* is a script the browser registers for a site and keeps around even when no
+  page of the site is open. It sits between the page and the network, can answer requests from a
+  cache (that is how offline apps work), and receives push messages. It covers only the folder it
+  is served from, so ollagi serves it at `/sw.js`.
+- A *maskable* icon has a background that fills the square and its picture inside the middle 80 %,
+  so Android can cut it to a circle or a rounded square without losing anything.
+- A PNG file is a signature and then chunks: `IHDR` (size, colour type), `IDAT` (the pixel rows,
+  zlib-compressed, each row starting with a filter byte) and `IEND`, each with a CRC.
+  `scripts/make_icons.py` writes one with `struct` and `zlib`.
+
+## Web Push: ECDH, HKDF, AES-GCM and VAPID (decision 0024)
+
+- *Web Push* sends a message from a server to a browser through the browser maker's *push service*
+  (Google's for Chrome, Mozilla's for Firefox). The browser hands the page an *endpoint* address and
+  two keys of its own; the server encrypts to those keys and POSTs to the endpoint. The push service
+  carries the message but cannot read it.
+- *ECDH* (elliptic-curve Diffie-Hellman): each side has a key pair; my private key with your public
+  key gives the same secret as your private key with my public key, and nobody watching can
+  compute it. Web Push uses the P-256 curve and a fresh sender key for every message.
+- *HKDF* turns a secret into keys: "extract" is HMAC(salt, secret), "expand" is HMAC(that, info +
+  0x01) for the first 32 bytes. The `info` text ("Content-Encoding: aes128gcm") makes each derived
+  key different. With HMAC in the standard library it is three lines.
+- *AES-GCM* encrypts and adds a 16-byte tag; decrypting checks the tag, so a changed message is
+  refused instead of read wrongly. The *nonce* must never repeat with the same key; here every
+  message has its own key, so that holds.
+- *VAPID* says who is sending: a JSON Web Token (`aud` = the push service, `exp` = when it stops
+  being valid) signed with the server's own P-256 key (ES256). The page subscribed with that key's
+  public half, so the push service only accepts messages signed by this server.
+- A *test vector* is an input and output published with a standard. Matching RFC 8291's example
+  byte for byte is much stronger than encrypting and decrypting with my own code: two halves of the
+  same mistake would still agree with each other.
