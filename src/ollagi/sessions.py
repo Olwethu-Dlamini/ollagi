@@ -220,7 +220,14 @@ def screen(name: str, lines: int = 200, colours: bool = False, run: Run = run_co
     return result.stdout.rstrip("\n")
 
 
+def leave_scrollback(name: str, run: Run = run_command) -> None:
+    """Back to the live screen if the session is scrolled back (tmux's copy mode, entered by a mouse
+    wheel or a swipe on the page). There, keys are scroll commands and typed text would be lost."""
+    run(tmux(name, "if-shell", "-F", "-t", WINDOW, "#{pane_in_mode}", f"send-keys -t {WINDOW} -X cancel"))
+
+
 def send_text(name: str, text: str, press_enter: bool = True, run: Run = run_command) -> None:
+    leave_scrollback(name, run=run)
     # -l sends the text literally: "Enter" typed as a word stays the word, it is not a key press.
     run(tmux(name, "send-keys", "-t", WINDOW, "-l", text))
     if press_enter:
@@ -230,6 +237,7 @@ def send_text(name: str, text: str, press_enter: bool = True, run: Run = run_com
 def send_key(name: str, key: str, run: Run = run_command) -> None:
     if key not in ALLOWED_KEYS:
         raise ValueError(f"key not allowed: {key}")
+    leave_scrollback(name, run=run)
     run(tmux(name, "send-keys", "-t", WINDOW, key))
 
 

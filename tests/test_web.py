@@ -50,6 +50,9 @@ class FakeSessions:
     def send_text(self, name, text):
         self.sent.append(("text", name, text))
 
+    def leave_scrollback(self, name):
+        self.left_scrollback = getattr(self, "left_scrollback", []) + [name]
+
     def send_key(self, name, key):
         if key != "Enter":
             raise ValueError(f"key not allowed: {key}")
@@ -546,6 +549,20 @@ def test_a_live_terminal_relays_typing_and_output(fake_sessions):
         while b"hello" not in seen:
             seen += ws.receive_bytes()
     assert terminals.opened == [("demo", 30, 90)]
+
+
+def test_a_live_terminal_leaves_scrollback_before_typing_on(fake_sessions):
+    # A swipe scrolled the session back; the page says "bottom" before the next key, and the server
+    # brings tmux back to the live screen first, so the key reaches Claude, not tmux's scroll mode.
+    import json
+
+    with client(fake_sessions).websocket_connect(f"{WS}/demo/terminal", headers=PAGE) as ws:
+        ws.send_text(json.dumps({"type": "bottom"}))
+        ws.send_text(json.dumps({"type": "input", "data": "after\n"}))
+        seen = b""
+        while b"after" not in seen:
+            seen += ws.receive_bytes()
+    assert fake_sessions.left_scrollback == ["demo"]
 
 
 def refused_with(c, url, headers):

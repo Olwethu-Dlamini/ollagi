@@ -39,6 +39,8 @@ def opened():
 def test_the_page_sends_typing_and_size_changes_as_small_json_messages():
     assert terminal.parse('{"type": "input", "data": "ls\\r"}') == Input("ls\r")
     assert terminal.parse('{"type": "resize", "rows": 40, "cols": 120}') == Resize(40, 120)
+    # After scrolling back with a swipe: return to the live screen before the next key.
+    assert terminal.parse('{"type": "bottom"}') == terminal.Bottom()
 
 
 @pytest.mark.parametrize("message", [

@@ -414,7 +414,8 @@ def create_app(config: Config, machine=None, sessions_api=sessions, run_watcher=
         if sessions_api.scope_state(name)[0]:
             return await websocket.close(code=4409, reason=f"{name} is frozen; resume it first")
         await websocket.accept()
-        await terminal.relay(websocket, open_terminal(name, rows, cols))
+        await terminal.relay(websocket, open_terminal(name, rows, cols),
+                             to_bottom=lambda: sessions_api.leave_scrollback(name))
 
     @app.post("/api/sessions/{name}/send")
     def send(name: str, body: SendRequest):

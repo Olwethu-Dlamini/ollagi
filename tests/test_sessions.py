@@ -63,14 +63,24 @@ def test_ollagi_tmux_settings_free_ctrl_b_for_claude_and_make_esc_instant():
 def test_text_is_sent_literally_then_enter_is_pressed():
     fake = FakeRun()
     sessions.send_text("demo", "Enter the room; rm -rf /", run=fake)
-    assert fake.calls[0][-2:] == ["-l", "Enter the room; rm -rf /"]
-    assert fake.calls[1][-1] == "Enter"
+    assert fake.calls[1][-2:] == ["-l", "Enter the room; rm -rf /"]
+    assert fake.calls[2][-1] == "Enter"
+
+
+def test_sending_first_leaves_scrollback(tmp_path):
+    # Scrolled up, tmux reads keys as scroll commands; typed text would be lost. So every send first
+    # returns to the live screen, if (and only if) the pane is scrolled.
+    fake = FakeRun()
+    sessions.send_text("demo", "hi", run=fake)
+    sessions.send_key("demo", "Enter", run=fake)
+    leave = ["if-shell", "-F", "-t", "main", "#{pane_in_mode}", "send-keys -t main -X cancel"]
+    assert fake.calls[0][-6:] == leave and fake.calls[3][-6:] == leave
 
 
 def test_only_allowed_keys_can_be_pressed():
     fake = FakeRun()
     sessions.send_key("demo", "Escape", run=fake)
-    assert fake.calls[0][-1] == "Escape"
+    assert fake.calls[-1][-1] == "Escape"
     with pytest.raises(ValueError):
         sessions.send_key("demo", "C-b", run=fake)  # the tmux prefix key could reach tmux itself
 
@@ -119,6 +129,8 @@ def test_a_real_session_starts_shows_output_takes_input_and_stops(tmp_path):
     try:
         assert name in sessions.names()
         _wait_for(lambda: "ready" in sessions.screen(name))
+        # Scrolled up the way a mouse wheel or a swipe does it; the text must still reach the program.
+        subprocess.run(sessions.tmux(name, "copy-mode", "-t", "main"), check=True)
         sessions.send_text(name, "hello")
         _wait_for(lambda: "got:hello" in sessions.screen(name))
         details = sessions.info(name)

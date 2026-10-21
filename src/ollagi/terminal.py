@@ -8,8 +8,9 @@ browser and back over a WebSocket. In the browser, xterm.js draws them like any 
     browser (xterm.js)  <-- WebSocket -->  this server  <-- pty -->  tmux attach  <-->  the session
 
 The page sends small JSON messages: {"type": "input", "data": "..."} for typing, and
-{"type": "resize", "rows": R, "cols": C} when its terminal changes size. The server sends the
-program's output back as raw bytes.
+{"type": "resize", "rows": R, "cols": C} when its terminal changes size, and {"type": "bottom"}
+before typing again after a swipe scrolled the session back. The server sends the program's output
+back as raw bytes.
 
 The program is started through `setsid -c`, which gives it a session of its own with the pty as its
 controlling terminal. Only then does the kernel tell it (SIGWINCH) that the terminal was resized.
@@ -48,13 +49,18 @@ class Resize:
     cols: int
 
 
+@dataclass(frozen=True)
+class Bottom:
+    """Back to the live screen: the session was scrolled back and the next key is for the program."""
+
+
 def valid_size(rows, cols) -> bool:
     return (type(rows) is int and type(cols) is int  # not bool, not "40"
             and 1 <= rows <= MAX_ROWS and 1 <= cols <= MAX_COLS)
 
 
-def parse(message: str) -> Input | Resize:
-    """One message from the page. Anything that is not exactly typing or a resize is refused."""
+def parse(message: str) -> Input | Resize | Bottom:
+    """One message from the page. Anything that is not exactly typing, a resize or "bottom" is refused."""
     try:
         data = json.loads(message)
     except ValueError as error:
@@ -65,7 +71,9 @@ def parse(message: str) -> Input | Resize:
         return Input(data["data"])
     if data.get("type") == "resize" and valid_size(data.get("rows"), data.get("cols")):
         return Resize(data["rows"], data["cols"])
-    raise ValueError("expected an input or a resize message")
+    if data == {"type": "bottom"}:
+        return Bottom()
+    raise ValueError("expected an input, a resize or a bottom message")
 
 
 def session_command(name: str) -> list[str]:
@@ -138,13 +146,16 @@ class Terminal:
             self.process.wait()
 
 
-async def relay(websocket, term: Terminal) -> None:
+async def relay(websocket, term: Terminal, to_bottom=None) -> None:
     """Pass bytes between the browser and the program until either side ends.
 
     The event loop watches the pty and calls `readable` when there is output. Output goes through a
     stream to a single sender, so it reaches the browser in the order it was printed. The two
     directions run in one anyio task group (the same library Starlette uses), so when one ends, the
-    other is cancelled cleanly; closing the pty is shielded so it happens even then."""
+    other is cancelled cleanly; closing the pty is shielded so it happens even then.
+
+    `to_bottom` brings the session back from scrollback; it runs to the end before the next message
+    is read, so the key that follows reaches the program."""
     loop = asyncio.get_running_loop()
     outgoing, output = anyio.create_memory_object_stream(math.inf)
     program_ended = False
@@ -180,6 +191,9 @@ async def relay(websocket, term: Terminal) -> None:
                 continue  # a bad message is ignored, not fatal
             if isinstance(parsed, Input):
                 term.write(parsed.data.encode())
+            elif isinstance(parsed, Bottom):
+                if to_bottom:
+                    await anyio.to_thread.run_sync(to_bottom)
             else:
                 term.resize(parsed.rows, parsed.cols)
 
