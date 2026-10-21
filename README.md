@@ -75,7 +75,8 @@ start another? yes: 1 more can start
 
 - `docs/guides/`: one full guide per feature: what it does, setup, how it works end to end, tests, troubleshooting, questions people ask.
   [Phone app and notifications](docs/guides/phone-app-and-notifications.md),
-  [Scrolling back on the phone](docs/guides/scrolling-back-on-the-phone.md).
+  [Scrolling back on the phone](docs/guides/scrolling-back-on-the-phone.md),
+  [When the laptop freezes](docs/guides/when-the-laptop-freezes.md).
 - `docs/decisions/`: one short note per choice: what was decided, why, and what else was considered. Read these first.
 - `docs/suggestions.md`: ideas not decided yet, with what each would change and how to undo it.
 - `docs/learning/`: the concepts the code relies on (tmux, Tailscale, `/proc/meminfo`, systemd), explained in plain words.
