@@ -223,6 +223,17 @@ def test_the_page_and_its_files_are_served_and_nothing_else(fake_sessions):
     assert c.get("/static/index.html").status_code == 404
 
 
+def test_the_page_and_its_files_are_checked_for_a_new_version_every_time(fake_sessions):
+    # Without this a browser guesses how long to reuse its copy: a phone kept an old app.js for
+    # hours after an update and showed a new card with nothing behind it.
+    c = client(fake_sessions)
+    for path in ("/", "/static/app.js", "/static/style.css", "/static/ansi.js", "/manifest.webmanifest"):
+        assert c.get(path).headers.get("cache-control") == "no-cache", path
+    # The check is cheap: the browser sends the ETag it has and gets "not modified" back.
+    etag = c.get("/static/app.js").headers["etag"]
+    assert c.get("/static/app.js", headers={"If-None-Match": etag}).status_code == 304
+
+
 def test_the_page_can_be_installed_as_an_app(fake_sessions):
     c = client(fake_sessions)
     assert '<link rel="manifest" href="/manifest.webmanifest">' in c.get("/").text

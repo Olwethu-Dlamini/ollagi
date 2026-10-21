@@ -13,7 +13,9 @@
 <link rel="manifest" href="/manifest.webmanifest">
 <!-- The page is four small files: this structure, style.css (looks), ansi.js (terminal colours)
      and app.js (behaviour). -->
-<script type="module" src="/static/app.js"></script>
+<!-- ?v=2: a new address, once, so phones that kept an old app.js (from before the server sent
+     no-cache) fetch it again. The server ignores the ?v part. -->
+<script type="module" src="/static/app.js?v=2"></script>
 </head>
 <body>
 

@@ -59,6 +59,20 @@ from ollagi.config import Config
 from ollagi.processes import find_sessions, read_processes
 
 STATIC = Path(__file__).parent / "static"
+# The page's own files: the browser asks each time whether its copy is still current (a cheap
+# "304 not modified" when it is). Without this it guesses, and kept an old app.js for hours.
+NO_CACHE = {"Cache-Control": "no-cache"}
+
+
+def page_file(request: Request, path: Path, media_type: str | None = None) -> Response:
+    """One of the page's files, or "304 not modified" when the browser already has this version.
+    The ETag names the version: the file's change time and size."""
+    stat = path.stat()
+    etag = f'"{stat.st_mtime_ns:x}-{stat.st_size:x}"'
+    headers = {**NO_CACHE, "ETag": etag}
+    if request.headers.get("if-none-match") == etag:
+        return Response(status_code=304, headers=headers)
+    return FileResponse(path, media_type=media_type, headers=headers)
 
 
 def real_machine() -> SimpleNamespace:
@@ -224,27 +238,27 @@ def create_app(config: Config, machine=None, sessions_api=sessions, run_watcher=
         return how_many_can_start(memory, load, [s.tree_rss for s in claude_sessions], Limits())
 
     @app.get("/")
-    def page():
-        return FileResponse(STATIC / "index.html")
+    def page(request: Request):
+        return page_file(request, STATIC / "index.html")
 
     @app.get("/static/{name}")
-    def static_file(name: str):
+    def static_file(name: str, request: Request):
         """The page's own files. Only these names are served, so no other file can be reached."""
         if name not in {"style.css", "app.js", "ansi.js", "xterm.mjs", "xterm-addon-fit.mjs", "xterm.css",
                         "icon-192.png", "icon-512.png"}:
             raise HTTPException(404, "no such file")
-        return FileResponse(STATIC / name)
+        return page_file(request, STATIC / name)
 
     @app.get("/manifest.webmanifest")
-    def manifest():
+    def manifest(request: Request):
         """Name, icons and look of the installed app (docs/decisions/0023)."""
-        return FileResponse(STATIC / "manifest.webmanifest", media_type="application/manifest+json")
+        return page_file(request, STATIC / "manifest.webmanifest", "application/manifest+json")
 
     @app.get("/sw.js")
-    def service_worker():
+    def service_worker(request: Request):
         # Served from the root, so it covers every page of the site. no-cache: the browser checks
         # for a new version each time instead of keeping an old one for up to a day.
-        return FileResponse(STATIC / "sw.js", media_type="text/javascript", headers={"Cache-Control": "no-cache"})
+        return page_file(request, STATIC / "sw.js", "text/javascript")
 
     @app.get("/qr.svg")
     def qr_code():
