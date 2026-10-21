@@ -40,3 +40,5 @@ traffic between my devices. I turned on HTTPS certificates for the tailnet in th
   was a secure context, the live terminal connected over `wss://`, and the voice button took the
   speech path (a stand-in recogniser, as headless has no microphone) without the "needs https"
   message; the words went into the box and reached the session after send; no page errors.
+
+On my phone through the tailnet, 2026-10-21: it works on https.
