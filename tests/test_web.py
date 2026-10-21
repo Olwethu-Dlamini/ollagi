@@ -34,7 +34,8 @@ class FakeSessions:
         return sorted(self.running)
 
     def info(self, name):
-        return SessionInfo(name, self.running[name], 4242, 1_000_000, True, 300 * MIB, 500 * MIB)
+        # Like the real one: a frozen session is reported from its record, without asking tmux.
+        return SessionInfo(name, self.running[name], 4242, 1_000_000, True, 300 * MIB, 500 * MIB, name in self.frozen)
 
     def screen(self, name, lines=200, colours=False):
         return self.screens.get(name, "Claude is waiting for you")
@@ -100,6 +101,19 @@ class FakeJira:
         t = lambda key, summary: Ticket(key, summary, "To Do", (), None, "Task", f"https://j.example/browse/{key}")  # noqa: E731
         return [t("T-1", "E2E: checkout - 3 test(s) failing"), t("T-2", "E2E: search - 1 test(s) failing"),
                 t("T-3", "Export the yearly report")]
+
+
+def temp_notifier():
+    """Phones kept in a temporary folder and a sender that records instead of sending: tests never
+    reach a push service."""
+    from cryptography.hazmat.primitives.asymmetric import ec
+
+    from ollagi.notify import Notifier, Subscribers
+
+    notifier = Notifier(Subscribers(Path(tempfile.mkdtemp()) / "push.db"), ec.generate_private_key(ec.SECP256R1()),
+                        send=lambda sub, message, key, now: notifier.sent.append((sub.endpoint, message)))
+    notifier.sent = []
+    return notifier
 
 
 def temp_outbox(helper=None):
@@ -181,11 +195,12 @@ class CatTerminals:
 
 
 def client(fake_sessions, available_gib=8.0, jira=None, outbox=None, outside_api=None, windows=None, terminals=None,
-           summariser=None, **config):
+           summariser=None, notifier=None, **config):
     from ollagi.web import create_app
 
     cfg = Config(projects=(Project("simedia", "/work/DATA!"),), **config)
     app = create_app(cfg, machine=machine(available_gib), sessions_api=fake_sessions, queue_store=temp_store(),
+                     notifier=notifier or temp_notifier(),
                      jira_client=jira or FakeJira(), outbox=outbox or temp_outbox(), outside_api=outside_api or FakeOutside(),
                      desktop_api=windows if windows is not None else FakeWindows(),
                      open_terminal=terminals if terminals is not None else CatTerminals(),
@@ -314,7 +329,7 @@ def test_the_watcher_reads_scopes_and_freezes_through_the_sessions_module(fake_s
     """Runs the server's own watcher read and act functions, as the background thread does."""
     from ollagi.web import create_app
 
-    app = create_app(Config(), machine=machine(available_gib=0.5), sessions_api=fake_sessions, queue_store=temp_store(),
+    app = create_app(Config(), machine=machine(available_gib=0.5), sessions_api=fake_sessions, notifier=temp_notifier(), queue_store=temp_store(),
                      outbox=temp_outbox())
     w, read, act = app.state.watcher, app.state.watcher_read, app.state.watcher_act
     available, pressure, states = read()
@@ -333,7 +348,7 @@ def test_qr_code_is_an_svg_of_the_phone_address(fake_sessions):
 
     if not shutil.which("qrencode"):
         pytest.skip("qrencode not installed")
-    app = create_app(Config(), machine=machine(), sessions_api=fake_sessions, phone_url="http://box.tail1.ts.net",
+    app = create_app(Config(), machine=machine(), sessions_api=fake_sessions, notifier=temp_notifier(), phone_url="http://box.tail1.ts.net",
                      queue_store=temp_store(), outbox=temp_outbox())
     response = TestClient(app, base_url="http://127.0.0.1:8765").get("/qr.svg")
     assert response.status_code == 200
@@ -412,14 +427,14 @@ def test_queue_events_become_drafts_only_when_a_channel_is_configured(fake_sessi
     from ollagi.web import create_app
 
     box = temp_outbox()
-    app = create_app(Config(slack_drafts_to="#me"), machine=machine(), sessions_api=fake_sessions,
+    app = create_app(Config(slack_drafts_to="#me"), machine=machine(), sessions_api=fake_sessions, notifier=temp_notifier(),
                      queue_store=temp_store(), outbox=box)
     app.state.note_queue_event("task 3 done")
     app.state.note_queue_event("task 4 started as session q4")  # not worth a draft
     assert [(d.channel, d.text, d.status) for d in box.all()] == [("#me", "ollagi: task 3 done", "draft")]
 
     quiet = temp_outbox()
-    app = create_app(Config(), machine=machine(), sessions_api=fake_sessions, queue_store=temp_store(), outbox=quiet)
+    app = create_app(Config(), machine=machine(), sessions_api=fake_sessions, notifier=temp_notifier(), queue_store=temp_store(), outbox=quiet)
     app.state.note_queue_event("task 3 done")
     assert quiet.all() == []
 
@@ -621,3 +636,68 @@ def test_a_failed_summary_says_why(fake_sessions):
     response = c.post("/api/sessions/demo/summary", headers=CHANGE)
     assert response.status_code == 502
     assert "usage limit" in response.json()["detail"]
+
+
+def a_subscription():
+    """What a browser's pushManager.subscribe() gives the page, with keys made here."""
+    from cryptography.hazmat.primitives.asymmetric import ec
+
+    from ollagi import webpush
+
+    key = ec.generate_private_key(ec.SECP256R1())
+    return {"endpoint": "https://fcm.googleapis.com/fcm/send/abc:123",
+            "keys": {"p256dh": webpush.b64(webpush.public_bytes(key.public_key())), "auth": webpush.b64(b"0123456789abcdef")}}
+
+
+def test_the_page_gets_the_server_key_and_registers_a_phone(fake_sessions):
+    notifier = temp_notifier()
+    c = client(fake_sessions, notifier=notifier)
+    from ollagi import webpush
+
+    state = c.get("/api/push").json()
+    assert webpush.unb64(state["public_key"]) == webpush.public_bytes(notifier.key.public_key())
+    assert state["phones"] == 0
+    assert c.post("/api/push/subscribe", json=a_subscription(), headers=CHANGE).status_code == 200
+    assert c.get("/api/push").json()["phones"] == 1
+    assert c.post("/api/push/unsubscribe", json={"endpoint": a_subscription()["endpoint"]}, headers=CHANGE).json() == {"removed": True}
+    assert c.get("/api/push").json()["phones"] == 0
+
+
+def test_a_subscription_must_come_from_the_page_and_point_at_a_push_service(fake_sessions):
+    c = client(fake_sessions)
+    # Without the X-Ollagi header (another website's form, say) nothing is stored.
+    assert c.post("/api/push/subscribe", json=a_subscription()).status_code == 403
+    elsewhere = {**a_subscription(), "endpoint": "https://127.0.0.1:8765/api/sessions/demo/stop"}
+    assert c.post("/api/push/subscribe", json=elsewhere, headers=CHANGE).status_code == 400
+    assert c.get("/api/push").json()["phones"] == 0
+
+
+def test_a_test_notice_goes_to_every_phone(fake_sessions):
+    notifier = temp_notifier()
+    c = client(fake_sessions, notifier=notifier)
+    assert c.post("/api/push/test", json={}, headers=CHANGE).status_code == 409  # no phone yet
+    c.post("/api/push/subscribe", json=a_subscription(), headers=CHANGE)
+    assert c.post("/api/push/test", json={}, headers=CHANGE).json() == {"sent": 1, "failed": []}
+    assert notifier.sent[0][1]["tag"] == "test"
+
+
+def test_queue_events_and_watcher_actions_are_handed_to_the_notifier(fake_sessions):
+    from ollagi.watcher import Action
+
+    notifier = temp_notifier()
+    c = client(fake_sessions, notifier=notifier)
+    c.app.state.note_queue_event("task 4 started as session q4")
+    c.app.state.note_queue_event("task 4 done")
+    c.app.state.watcher_act(Action("freeze", "demo"))
+    waiting = []
+    while not notifier.outbox.empty():
+        waiting.append(notifier.outbox.get())
+    assert [(n.title, n.body) for n in waiting] == [("Queue", "task 4 done"), ("Memory low", "Paused demo to free memory.")]
+
+
+def test_the_server_reads_session_states_for_the_notifier(fake_sessions):
+    fake_sessions.screens["demo"] = "\n".join(["Do you want to make this edit?", "❯ 1. Yes", "  2. No"])
+    c = client(fake_sessions)
+    assert c.app.state.read_states() == {"demo": ("needs_you", "Do you want to make this edit?")}
+    fake_sessions.freeze("demo")
+    assert c.app.state.read_states() == {"demo": ("frozen", None)}

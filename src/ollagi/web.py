@@ -25,6 +25,10 @@
     POST /api/slack/drafts              add a draft       {"channel", "text", "thread_ts"}
     POST /api/slack/drafts/{id}/edit | /preview | /discard
     POST /api/slack/drafts/{id}/send    send ONE draft    {"confirmed_text"}, which must equal its text
+    GET  /api/push                      notifications: the server's public key, phones, recent events
+    POST /api/push/subscribe            register this phone's browser   {"endpoint", "keys"}
+    POST /api/push/unsubscribe          forget it                       {"endpoint"}
+    POST /api/push/test                 send a test notification to every phone
     GET  /qr.svg                        the phone address as a QR code
     GET  /manifest.webmanifest          what a phone needs to install the page as an app
     GET  /sw.js                         the service worker (installing, and notifications)
@@ -48,7 +52,8 @@ from pydantic import BaseModel
 
 from collections import deque
 
-from ollagi import access, claude_screen, desktop, grouping, outside, queue as queueing, sessions, slack_outbox, summary, system, terminal, watcher as watching
+from ollagi import (access, claude_screen, desktop, grouping, notify, outside, queue as queueing, sessions, slack_outbox,
+                    summary, system, terminal, watcher as watching, webpush)
 from ollagi.budget import Limits, how_many_can_start
 from ollagi.config import Config
 from ollagi.processes import find_sessions, read_processes
@@ -107,6 +112,20 @@ class SendDraftRequest(BaseModel):
 class TakeoverRequest(BaseModel):
     confirm_name: str
 
+
+class PushKeys(BaseModel):
+    p256dh: str
+    auth: str
+
+
+class SubscribeRequest(BaseModel):
+    endpoint: str
+    keys: PushKeys
+
+
+class UnsubscribeRequest(BaseModel):
+    endpoint: str
+
 # Claude Code's own status words for a session, as the page's state dots.
 OUTSIDE_STATE = {"busy": "working", "waiting": "needs_you", "idle": "done"}
 
@@ -116,7 +135,8 @@ DRAFT_WORTHY = (" done", "waiting for you", "usage limit", "failed")
 
 def create_app(config: Config, machine=None, sessions_api=sessions, run_watcher=False, phone_url=None,
                queue_store=None, run_queue=False, command_for=None, results_dir=None, jira_client=None,
-               outbox=None, outside_api=outside, desktop_api=None, open_terminal=None, summarise=None) -> FastAPI:
+               outbox=None, outside_api=outside, desktop_api=None, open_terminal=None, summarise=None,
+               notifier=None, run_notifier=False) -> FastAPI:
     machine = machine or real_machine()
     # Windows on this laptop for a session (docs/decisions/0017). Only the page's Start and the
     # open/close button use them; the overnight queue never opens one.
@@ -131,6 +151,8 @@ def create_app(config: Config, machine=None, sessions_api=sessions, run_watcher=
     store = queue_store or queueing.Store()
     drafts = outbox or slack_outbox.Outbox()
     queue_events: deque = deque(maxlen=50)
+    # Notifications on the phone (docs/decisions/0024). Tests pass one that never sends.
+    notifier = notifier or notify.Notifier(notify.Subscribers(), webpush.load_or_create_key(notify.DEFAULT_KEY))
 
     def room_for_a_task() -> bool:
         """The queue may start a task only when the budget says one fits and the watcher is green."""
@@ -144,6 +166,7 @@ def create_app(config: Config, machine=None, sessions_api=sessions, run_watcher=
         queue_events.append({"time": time.time(), "text": text})
         if config.slack_drafts_to and any(word in text for word in DRAFT_WORTHY):
             drafts.add(config.slack_drafts_to, f"ollagi: {text}", source="queue")
+        notifier.notify(notify.queue_notice(text))
 
     runner = queueing.Runner(store, sessions_api, room=room_for_a_task,
                              **({"command_for": command_for} if command_for else {}),
@@ -160,6 +183,7 @@ def create_app(config: Config, machine=None, sessions_api=sessions, run_watcher=
 
     def act_for_watcher(action: watching.Action) -> None:
         {"freeze": sessions_api.freeze, "thaw": sessions_api.thaw, "stop": sessions_api.stop}[action.kind](action.name)
+        notifier.notify(notify.watcher_notice(action.kind, action.name))
 
     @asynccontextmanager
     async def lifespan(app):
@@ -171,6 +195,9 @@ def create_app(config: Config, machine=None, sessions_api=sessions, run_watcher=
             ).start()
         if run_queue:
             threading.Thread(target=queueing.run_forever, args=(runner, note_queue_event, stop), daemon=True).start()
+        if run_notifier:
+            threading.Thread(target=notify.run_sender, args=(notifier, stop), daemon=True).start()
+            threading.Thread(target=notify.watch_sessions, args=(read_states, notifier, stop), daemon=True).start()
         yield
         stop.set()
 
@@ -182,6 +209,7 @@ def create_app(config: Config, machine=None, sessions_api=sessions, run_watcher=
     app.state.queue_runner = runner
     app.state.note_queue_event = note_queue_event
     app.state.summary_lock = summary_lock
+    app.state.notifier = notifier
 
     @app.middleware("http")
     async def check_access(request: Request, call_next):
@@ -282,6 +310,16 @@ def create_app(config: Config, machine=None, sessions_api=sessions, run_watcher=
         if not info.alive:
             return claude_screen.Reading("exited")
         return claude_screen.read(sessions_api.screen(name, lines=80))
+
+    def read_states() -> dict[str, tuple[str, str | None]]:
+        """Every session's state and question, as the page shows them; the notifier reads this."""
+        found = {}
+        for name in sessions_api.names():
+            reading = state_of(name, sessions_api.info(name))
+            found[name] = (reading.state, reading.question)
+        return found
+
+    app.state.read_states = read_states
 
     @app.get("/api/sessions")
     def list_sessions():
@@ -559,6 +597,32 @@ def create_app(config: Config, machine=None, sessions_api=sessions, run_watcher=
     @app.post("/api/slack/drafts/{draft_id}/send")
     def send_draft(draft_id: int, body: SendDraftRequest):
         return draft_action(draft_id, lambda: asdict(drafts.send(draft_id, body.confirmed_text)))
+
+    @app.get("/api/push")
+    def push_state():
+        return {
+            "public_key": webpush.b64(webpush.public_bytes(notifier.key.public_key())),
+            "phones": len(notifier.subscribers.all()),
+            "events": list(notifier.events)[-10:],
+        }
+
+    @app.post("/api/push/subscribe")
+    def push_subscribe(body: SubscribeRequest):
+        try:
+            notifier.subscribers.add(webpush.Subscription(body.endpoint, body.keys.p256dh, body.keys.auth))
+        except ValueError as error:
+            raise HTTPException(400, str(error)) from error
+        return {"subscribed": True}
+
+    @app.post("/api/push/unsubscribe")
+    def push_unsubscribe(body: UnsubscribeRequest):
+        return {"removed": notifier.subscribers.remove(body.endpoint)}
+
+    @app.post("/api/push/test")
+    def push_test():
+        if not notifier.subscribers.all():
+            raise HTTPException(409, "no phone has turned notifications on yet")
+        return notifier.deliver(notify.Notice("ollagi", "Notifications work on this phone.", "test", "/"))
 
     @app.post("/api/sessions/{name}/freeze")
     def freeze(name: str):
