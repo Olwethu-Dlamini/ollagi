@@ -34,8 +34,9 @@ Early. Built in small steps, one idea per commit, so every part can be read and 
 | 8d | Live: the session as a real terminal in the page (xterm.js over a WebSocket) | done |
 | 9 | Summary: a session's screen summarised by Haiku, only on request | done |
 | 9a | Sessions open in Claude's own live screen; a plain look; voice into the message box; fits above the keyboard | done |
-| 9b | Installable app on the phone (needs HTTPS for the tailnet) | next |
-| 9c | Phone notifications through Web Push: needs you, finished, usage limit (needs HTTPS) | next |
+| 9b | HTTPS for the phone: the page on https://, voice works | done |
+| 9c | Installable app on the phone | next |
+| 9d | Phone notifications through Web Push: needs you, finished, usage limit | next |
 
 ## Try it
 
@@ -52,7 +53,7 @@ Phone access, once (decision 0007):
 ```bash
 systemctl --user enable --now "$PWD/deploy/ollagi.service"   # page starts at login
 sudo tailscale set --operator=$USER                            # lets tailscale serve run without sudo
-tailscale serve --bg --http=80 http://127.0.0.1:8765           # page on http://<machine>.<tailnet>.ts.net
+tailscale serve --bg --https=443 http://127.0.0.1:8765        # page on https://<machine>.<tailnet>.ts.net (HTTPS on in the admin console)
 ```
 
 `ollagi doctor` on this laptop, 2026-10-19 12:15 (two sessions already open):
