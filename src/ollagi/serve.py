@@ -45,7 +45,7 @@ def qr(args) -> int:
     if net is None:
         print("Tailscale is not running, so there is no phone address.")
         return 1
-    url = args.url or net.url(https=args.https)
+    url = args.url or net.url(https=True if args.https else None)
     print(url)
     if shutil.which("qrencode"):
         # qrencode draws the code with block characters the terminal can show.
@@ -66,6 +66,6 @@ def add_to(subparsers) -> None:
     parser.set_defaults(handler=run)
 
     parser = subparsers.add_parser("qr", help="show the page's tailnet address as a QR code")
-    parser.add_argument("--https", action="store_true", help="use https (needs HTTPS enabled for the tailnet)")
+    parser.add_argument("--https", action="store_true", help="say https even if tailscale serve does not serve it yet")
     parser.add_argument("--url", help="show this address instead")
     parser.set_defaults(handler=qr)
