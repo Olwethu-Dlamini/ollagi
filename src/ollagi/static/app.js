@@ -69,6 +69,10 @@ $("qr-close").onclick = () => ($("qr-sheet").hidden = true);
 
 // ---- sessions (home) ------------------------------------------------------------------------
 function renderSessions() {
+  // An open session covers the list; rebuilding it every 4 s would be work the phone never sees.
+  // The lists themselves are still fetched (the session's header and switcher read them), and
+  // closing the session draws the list fresh.
+  if (current) return;
   // Claude processes that are neither ollagi's nor in Claude's own session files (rare). Drawn here,
   // after both lists are loaded: the two requests run at the same time and either may finish first.
   const known = new Set(outsideSessions.map((o) => o.pid));
