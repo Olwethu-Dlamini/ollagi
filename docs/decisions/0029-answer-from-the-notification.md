@@ -42,4 +42,4 @@ No; the trust prompt gives "Yes, I trust this folder" and "No, exit"; the plan m
 menu give no buttons. The route refuses another question (409), a choice not offered (409) and a
 session whose prompt is back (409), and presses the key when the question matches.
 
-Not yet checked: on my phone, a tap on a button of a real notification.
+On my phone, 2026-10-22: Allow and Deny on a real notification answered the session.

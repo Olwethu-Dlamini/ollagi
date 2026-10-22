@@ -42,8 +42,10 @@ push, in front, and Turn off silences everything; a toggle can come if it annoys
 message sent to a phone carries the flag). Headless Chromium: after a tap, a service-worker
 message for an urgent notice created three oscillators (the real AudioContext, wrapped to count).
 
-Not yet checked: on my phone, whether the vibration and the chime come through, and the Android
-channel setting.
+On my phone, 2026-10-22: the notifications arrived silent, without vibration, only the light.
+That was the phone's notification category for ollagi, set to silent; once it was switched to
+alerting, a test notification sounded. Nothing in the code changed for that. An ntfy server on the
+laptop had been considered as a way round it and was not needed.
 
 ## Sources
 
