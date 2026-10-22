@@ -109,10 +109,12 @@ function renderSessions() {
   $("groups").replaceChildren(...blocks);
 }
 
-// "working · 9h · 1.0 GiB": what a row and the session's header say under the name.
+// "working · 9h · 1.0 GiB": what a row and the session's header say under the name. The states
+// are read from Claude's screen, so a shell session gets none: just its age and memory.
 function describe(s) {
-  return [STATES[s.state], age(s.age_seconds), size(s.memory_current)].filter(Boolean).join(" · ");
+  return [isClaude(s) ? STATES[s.state] : null, age(s.age_seconds), size(s.memory_current)].filter(Boolean).join(" · ");
 }
+function isClaude(s) { return !s.program || s.program === "claude"; }
 function size(bytes) {
   if (bytes == null) return "";
   return bytes >= GiB ? (bytes / GiB).toFixed(1) + " GiB" : Math.round(bytes / MiB) + " MiB";
@@ -125,7 +127,9 @@ function sessionRow(s) {
   if (s.outside) return outsideRow(s);
   const row = el("button", null, `row ${s.state}`);
   const sub = s.state === "needs_you" && s.question ? s.question : describe(s);
-  row.append(el("span", null, `dot ${s.state}`), el("span", s.name, "name"), el("span", sub, "sub"));
+  const name = el("span", s.name, "name");
+  if (!isClaude(s)) name.append(el("span", s.program, "tag"));  // "bash": a plain terminal, not Claude
+  row.append(el("span", null, `dot ${s.state}`), name, el("span", sub, "sub"));
   row.onclick = () => openViewer(s.name);
   return row;
 }
@@ -179,8 +183,10 @@ $("new-form").onsubmit = async (event) => {
   $("new-error").textContent = "";
   const directory = $("new-dir").value.trim() || $("new-project").value;
   if (!directory) { $("new-error").textContent = "Choose a project or type a folder."; return; }
+  // Which button sent the form: Start Claude, or Start a terminal (a shell in the folder).
+  const program = event.submitter && event.submitter.id === "new-shell" ? "shell" : "claude";
   try {
-    await api("/api/sessions", { name: $("new-name").value.trim(), directory, force: $("new-force").checked });
+    await api("/api/sessions", { name: $("new-name").value.trim(), directory, force: $("new-force").checked, program });
     $("new-sheet").hidden = true;
     $("new-name").value = "";
     await refreshSessions();

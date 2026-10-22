@@ -141,13 +141,15 @@
 <!-- ===== Start a session (a sheet that slides up) ======================================== -->
 <div class="backdrop" id="new-sheet" hidden>
   <form class="sheet" id="new-form">
-    <h2>New Claude session</h2>
+    <h2>New session</h2>
     <input id="new-name" placeholder="name, e.g. sd-6641" required pattern="[a-z0-9][a-z0-9-]{0,31}" autocapitalize="off">
     <select id="new-project"></select>
     <input id="new-dir" placeholder="or a folder path" autocapitalize="off">
     <label class="muted"><input id="new-force" type="checkbox"> start even if memory is short</label>
     <div class="error" id="new-error"></div>
-    <button class="primary" type="submit">Start Claude</button>
+    <button class="primary" type="submit" id="new-claude">Start Claude</button>
+    <!-- A plain terminal in the folder (docs/decisions/0027): a shell in tmux, shown live like any session. -->
+    <button class="plain" type="submit" id="new-shell">Start a terminal</button>
     <button class="plain" type="button" id="new-cancel">Cancel</button>
   </form>
 </div>
