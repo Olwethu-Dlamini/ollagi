@@ -217,7 +217,7 @@ def test_the_page_and_its_files_are_served_and_nothing_else(fake_sessions):
     for name in ("style.css", "app.js", "ansi.js", "xterm.css"):
         assert c.get(f"/static/{name}").status_code == 200
     # Loaded with import(), which a browser only accepts with a JavaScript content type.
-    for name in ("xterm.mjs", "xterm-addon-fit.mjs"):
+    for name in ("xterm.mjs", "xterm-addon-fit.mjs", "xterm-addon-webgl.mjs"):
         response = c.get(f"/static/{name}")
         assert response.status_code == 200
         assert response.headers["content-type"].startswith("text/javascript")

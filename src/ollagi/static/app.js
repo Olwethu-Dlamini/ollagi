@@ -465,15 +465,32 @@ async function loadXterm() {
   if (!document.querySelector('link[href="/static/xterm.css"]')) {
     document.head.append(Object.assign(document.createElement("link"), { rel: "stylesheet", href: "/static/xterm.css" }));
   }
-  const [{ Terminal }, { FitAddon }] = await Promise.all([import("/static/xterm.mjs"), import("/static/xterm-addon-fit.mjs")]);
-  return { Terminal, FitAddon };
+  const [{ Terminal }, { FitAddon }, { WebglAddon }] = await Promise.all([
+    import("/static/xterm.mjs"), import("/static/xterm-addon-fit.mjs"), import("/static/xterm-addon-webgl.mjs")]);
+  return { Terminal, FitAddon, WebglAddon };
+}
+
+// xterm.js draws with DOM elements unless told otherwise, which is slow on a phone when Claude
+// redraws nine times a second. The WebGL add-on draws on the graphics chip instead. Where WebGL is
+// not available the DOM renderer stays; if the browser takes the graphics context away later, the
+// add-on is dropped and xterm.js falls back on its own.
+function drawWithWebgl(term, WebglAddon) {
+  try {
+    const webgl = new WebglAddon();
+    webgl.onContextLoss(() => webgl.dispose());
+    term.loadAddon(webgl);
+    return true;
+  } catch (error) {
+    console.warn("live terminal: no WebGL, drawing with the DOM:", error.message);
+    return false;
+  }
 }
 
 async function startLive() {
   const name = current;
   starting = true;
   try {
-    const { Terminal, FitAddon } = await loadXterm();
+    const { Terminal, FitAddon, WebglAddon } = await loadXterm();
     if (current !== name || live) return;  // the viewer moved on while xterm.js was loading
     const styles = getComputedStyle(document.documentElement);
     const term = new Terminal({
@@ -487,6 +504,7 @@ async function startLive() {
     $("screen").hidden = true;
     $("live").hidden = false;
     term.open($("live"));
+    drawWithWebgl(term, WebglAddon);  // after open: the add-on needs the element to draw in
     fitter.fit();
 
     const scheme = location.protocol === "https:" ? "wss" : "ws";
