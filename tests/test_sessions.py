@@ -107,6 +107,14 @@ def test_cgroup_events_say_whether_the_scope_is_frozen():
     assert sessions.parse_events("populated 1\nfrozen 0\n") is False
 
 
+def test_a_session_remembers_what_it_runs():
+    # The page tags a session that is not Claude, and the notifier leaves it alone (decision 0027).
+    assert sessions.program_of(["claude"]) == "claude"
+    assert sessions.program_of(["claude", "--resume", "conv-1"]) == "claude"
+    assert sessions.program_of(["/usr/bin/bash"]) == "bash"
+    assert sessions.program_of([]) == "claude"
+
+
 def test_a_saved_record_round_trips(tmp_path):
     sessions.save_record("demo", {"directory": "/w", "created": 5}, state_dir=tmp_path)
     assert sessions.load_record("demo", state_dir=tmp_path) == {"directory": "/w", "created": 5}

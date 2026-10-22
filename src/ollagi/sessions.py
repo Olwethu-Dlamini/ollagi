@@ -58,6 +58,7 @@ class SessionInfo:
     memory_current: int | None  # bytes, from the scope's cgroup; None if unknown
     memory_peak: int | None
     frozen: bool = False
+    program: str = "claude"  # what runs in the window: "claude", or a shell's name ("bash")
 
 
 def check_name(name: str) -> str:
@@ -123,7 +124,13 @@ def start(name: str, directory: str, command: Sequence[str] = ("claude",), run: 
         raise RuntimeError(f"could not start {name}: {result.stderr.strip()}")
     # If systemd-oomd must kill something under memory pressure, let it pick inside this session.
     run(["systemctl", "--user", "set-property", "--runtime", slice_unit(name), "ManagedOOMMemoryPressure=kill"])
-    save_record(name, {"directory": directory, "command": list(command), "created": int(time.time())})
+    save_record(name, {"directory": directory, "command": list(command), "created": int(time.time()),
+                       "program": program_of(command)})
+
+
+def program_of(command: Sequence[str]) -> str:
+    """The name of what a session runs: "claude" for `claude --resume ...`, "bash" for a shell."""
+    return Path(command[0]).name if command else "claude"
 
 
 def save_record(name: str, record: dict, state_dir: Path | None = None) -> None:
@@ -165,12 +172,13 @@ def parse_display(name: str, text: str) -> tuple[str, int, int, bool]:
 
 def info(name: str, run: Run = run_command, cgroup_root: Path = CGROUP_ROOT, state_dir: Path | None = None) -> SessionInfo:
     frozen, current, peak = scope_state(name, run=run, cgroup_root=cgroup_root)
+    record = load_record(name, state_dir)
+    program = record.get("program", "claude")
     if frozen:
-        record = load_record(name, state_dir)
-        return SessionInfo(name, record.get("directory", "?"), 0, record.get("created", 0), True, current, peak, True)
+        return SessionInfo(name, record.get("directory", "?"), 0, record.get("created", 0), True, current, peak, True, program)
     shown = run(tmux(name, "display-message", "-p", "-t", WINDOW, "#{pane_pid}|#{session_created}|#{pane_dead}|#{pane_current_path}"))
     directory, pid, created, alive = parse_display(name, shown.stdout)
-    return SessionInfo(name, directory, pid, created, alive, current, peak, False)
+    return SessionInfo(name, directory, pid, created, alive, current, peak, False, program)
 
 
 def scope_folder(name: str, run: Run = run_command, cgroup_root: Path = CGROUP_ROOT) -> Path | None:

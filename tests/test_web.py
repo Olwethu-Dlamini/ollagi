@@ -35,7 +35,8 @@ class FakeSessions:
 
     def info(self, name):
         # Like the real one: a frozen session is reported from its record, without asking tmux.
-        return SessionInfo(name, self.running[name], 4242, 1_000_000, True, 300 * MIB, 500 * MIB, name in self.frozen)
+        program = getattr(self, "commands", {}).get(name, ["claude"])[0]
+        return SessionInfo(name, self.running[name], 4242, 1_000_000, True, 300 * MIB, 500 * MIB, name in self.frozen, program)
 
     def screen(self, name, lines=200, colours=False):
         return self.screens.get(name, "Claude is waiting for you")
