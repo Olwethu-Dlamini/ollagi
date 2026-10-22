@@ -178,6 +178,7 @@ delivery, usually a second or two.
 | Send a test says "Not sent: ..." | Google refused or the laptop has no internet | The reason is in the message and in the event list |
 | No notification while a session clearly waits | The laptop is asleep or offline, or the session's screen is not recognised as a question (state detection knows numbered menus only) | Check the session's state dot on the page; see `docs/suggestions.md` about the lid |
 | Notifications stopped after reinstalling the app | The old subscription is gone (Google answered 410 and the server deleted it) | Turn on again |
+| A notification arrives but makes no sound | A page cannot choose a sound; Android plays the one set for the app's notification channel, and on many phones a new channel starts silent or "quiet" | Android Settings → Apps → ollagi (or Chrome → Sites) → Notifications → set the channel to make sound. The page vibrates the phone and, while it is in front, plays a chime of its own (decision 0028) |
 
 **The "…" bug, as it happened.** Until `32b04f3`, the server sent the page's files without a
 `Cache-Control` header. Browsers then guess how long a copy stays good, and Chrome reused its saved

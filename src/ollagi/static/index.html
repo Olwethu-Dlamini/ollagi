@@ -117,6 +117,9 @@
     <h2>Notifications</h2>
     <div class="kv"><span id="push-status">…</span><button class="plain" id="push-toggle" hidden></button></div>
     <p class="muted">When a session needs you or finishes, when a queue task ends, and when the RAM watcher acts.</p>
+    <!-- A page cannot choose the notification sound; the phone does (docs/decisions/0028). -->
+    <p class="muted">The sound and vibration are the phone's: on Android, Settings → Apps → ollagi → Notifications.
+      While this page is in front, it chimes by itself.</p>
     <div class="kv" id="push-test-row" hidden><span class="muted" id="push-phones"></span><button class="plain" id="push-test">Send a test</button></div>
     <ul class="events" id="push-events"></ul>
   </section>
