@@ -26,6 +26,25 @@ def test_a_question_is_announced_once_with_the_question():
     found = settle(watch, {"api": ("needs_you", "Do you want to make this edit?")})
     # Urgent: the phone keeps a question on screen until it is answered or dismissed.
     assert found == [Notice("api needs you", "Do you want to make this edit?", "session-api", "/?session=api", urgent=True)]
+
+
+def test_a_yes_or_no_question_gets_allow_and_deny_buttons():
+    from ollagi.claude_screen import Option
+
+    permission = [Option(1, "Yes"), Option(2, "Yes, and don’t ask again for: mkfifo fixture-fifo *"), Option(3, "No")]
+    assert notify.answer_buttons(permission) == (("1", "Yes"), ("3", "No"))
+    trust = [Option(1, "Yes, I trust this folder"), Option(2, "No, exit")]
+    assert notify.answer_buttons(trust) == (("1", "Yes, I trust this folder"), ("2", "No, exit"))
+    # A plan's menu has no plain No, and a pick-a-colour menu no Yes: those need the screen.
+    plan = [Option(1, "Yes, and use auto mode"), Option(2, "Yes, manually approve edits"), Option(4, "Tell Claude what to change")]
+    assert notify.answer_buttons(plan) == ()
+    assert notify.answer_buttons([Option(1, "Red"), Option(2, "Green")]) == ()
+    assert notify.answer_buttons([]) == ()
+    # The buttons travel with the notice, and the readings may carry the options as a third item.
+    watch = SessionWatch()
+    settle(watch, {"api": ("working", None)})
+    found = settle(watch, {"api": ("needs_you", "Do you want to proceed?", permission)})
+    assert found[0].actions == (("1", "Yes"), ("3", "No"))
     assert settle(watch, {"api": ("needs_you", "Do you want to make this edit?")}) == []
 
 
@@ -126,7 +145,7 @@ def test_a_notice_reaches_every_phone_and_a_forgotten_one_is_dropped(tmp_path):
     result = notifier.deliver(Notice("api needs you", "Allow?", "session-api", "/?session=api"))
     assert result == {"sent": 1, "failed": []}
     assert sent == [(kept, {"title": "api needs you", "body": "Allow?", "tag": "session-api", "url": "/?session=api",
-                            "urgent": False})]
+                            "urgent": False, "actions": []})]
     assert store.all() == [kept]
 
 

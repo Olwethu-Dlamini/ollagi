@@ -55,12 +55,30 @@ class Notice:
     tag: str  # the phone keeps only the newest notice per tag
     url: str  # where the page opens when the notice is tapped
     urgent: bool = False  # a question waiting for me: the phone keeps it on screen until I tap it
+    actions: tuple[tuple[str, str], ...] = ()  # buttons on the notification: (key to press, label)
 
 
-def session_notice(name: str, before: str, now: str, question: str | None) -> Notice | None:
+MAX_LABEL = 24
+
+
+def answer_buttons(options) -> tuple[tuple[str, str], ...]:
+    """Buttons for a yes-or-no menu: the first choice and the first "No" one, each as the number key
+    Claude Code takes and a short label (docs/decisions/0029). A menu that is not a yes-or-no
+    (a colour to pick, a plan with four ways on) gets none: that needs the screen.
+    A phone shows at most two buttons."""
+    if not options or not options[0].label.lower().startswith("yes"):
+        return ()
+    no = next((o for o in options[1:] if o.label.lower().startswith("no")), None)
+    if no is None:
+        return ()
+    return tuple((str(o.number), o.label[:MAX_LABEL].rstrip(" ,")) for o in (options[0], no))
+
+
+def session_notice(name: str, before: str, now: str, question: str | None, options=()) -> Notice | None:
     url = f"/?session={name}"
     if now == "needs_you":
-        return Notice(f"{name} needs you", question or "Claude is asking something.", f"session-{name}", url, urgent=True)
+        return Notice(f"{name} needs you", question or "Claude is asking something.", f"session-{name}", url,
+                      urgent=True, actions=answer_buttons(options))
     if now == "done" and before == "working":
         return Notice(f"{name} finished", "Claude's turn ended.", f"session-{name}", url)
     return None
@@ -73,13 +91,14 @@ class SessionWatch:
         self.last: dict[str, tuple[str, int]] = {}  # name -> (state last read, reads in a row)
         self.settled: dict[str, str] = {}           # name -> the state that counts
 
-    def update(self, readings: dict[str, tuple[str, str | None]]) -> list[Notice]:
-        """`readings`: name -> (state, question) for every session now."""
+    def update(self, readings: dict[str, tuple]) -> list[Notice]:
+        """`readings`: name -> (state, question) or (state, question, options) for every session now."""
         for gone in set(self.last) - set(readings):
             self.last.pop(gone)
             self.settled.pop(gone, None)
         found = []
-        for name, (state, question) in readings.items():
+        for name, (state, question, *rest) in readings.items():
+            options = rest[0] if rest else ()
             previous, count = self.last.get(name, (None, 0))
             count = count + 1 if state == previous else 1
             self.last[name] = (state, count)
@@ -89,7 +108,7 @@ class SessionWatch:
             self.settled[name] = state
             if before is None or QUEUE_SESSION.match(name):
                 continue
-            notice = session_notice(name, before, state, question)
+            notice = session_notice(name, before, state, question, options)
             if notice:
                 found.append(notice)
         return found
@@ -152,7 +171,7 @@ class Notifier:
 
     def deliver(self, notice: Notice) -> dict:
         """Send now, to every phone. A phone its push service has forgotten is dropped."""
-        message = {**asdict(notice), "body": notice.body[:MAX_BODY]}
+        message = {**asdict(notice), "body": notice.body[:MAX_BODY], "actions": [list(a) for a in notice.actions]}
         sent, failed = 0, []
         for sub in self.subscribers.all():
             try:

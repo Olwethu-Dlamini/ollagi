@@ -57,7 +57,9 @@ class FakeSessions:
         self.left_scrollback = getattr(self, "left_scrollback", []) + [name]
 
     def send_key(self, name, key):
-        if key != "Enter":
+        from ollagi.sessions import ALLOWED_KEYS
+
+        if key not in ALLOWED_KEYS:
             raise ValueError(f"key not allowed: {key}")
         self.sent.append(("key", name, key))
 
@@ -743,9 +745,27 @@ def test_queue_events_and_watcher_actions_are_handed_to_the_notifier(fake_sessio
 def test_the_server_reads_session_states_for_the_notifier(fake_sessions):
     fake_sessions.screens["demo"] = "\n".join(["Do you want to make this edit?", "❯ 1. Yes", "  2. No"])
     c = client(fake_sessions)
-    assert c.app.state.read_states() == {"demo": ("needs_you", "Do you want to make this edit?")}
+    from ollagi.claude_screen import Option
+
+    assert c.app.state.read_states() == {"demo": ("needs_you", "Do you want to make this edit?", (Option(1, "Yes"), Option(2, "No")))}
     fake_sessions.freeze("demo")
-    assert c.app.state.read_states() == {"demo": ("frozen", None)}
+    assert c.app.state.read_states() == {"demo": ("frozen", None, ())}
+
+
+def test_a_notification_button_answers_only_the_question_still_on_screen(fake_sessions):
+    # Allow and Deny on the phone's notification (docs/decisions/0029). A notification can be minutes
+    # old: a key pressed into a session that has moved on would be typed into Claude's prompt.
+    fake_sessions.screens["demo"] = "\n".join(["Do you want to make this edit?", "❯ 1. Yes", "  2. No"])
+    c = client(fake_sessions)
+    stale = c.post("/api/sessions/demo/answer", json={"key": "1", "question": "Do you want to proceed?"}, headers=CHANGE)
+    assert stale.status_code == 409 and fake_sessions.sent == []
+    missing = c.post("/api/sessions/demo/answer", json={"key": "3", "question": "Do you want to make this edit?"}, headers=CHANGE)
+    assert missing.status_code == 409 and fake_sessions.sent == []
+    ok = c.post("/api/sessions/demo/answer", json={"key": "2", "question": "Do you want to make this edit?"}, headers=CHANGE)
+    assert ok.status_code == 200 and fake_sessions.sent == [("key", "demo", "2")]
+    fake_sessions.screens["demo"] = "❯ "  # answered: the prompt box is back
+    gone = c.post("/api/sessions/demo/answer", json={"key": "2", "question": "Do you want to make this edit?"}, headers=CHANGE)
+    assert gone.status_code == 409
 
 
 def test_a_shell_session_never_notifies(fake_sessions):

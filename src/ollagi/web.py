@@ -6,6 +6,7 @@
     GET  /api/sessions/{name}/screen    the end of a session's screen, as text
     POST /api/sessions                  start a session   {"name", "directory", "force", "program": "claude" | "shell"}
     POST /api/sessions/{name}/send      type into it      {"text"} or {"key"}
+    POST /api/sessions/{name}/answer    press a menu key, only if that question is still on screen {"key", "question"}
     POST /api/sessions/{name}/stop      stop it
     POST /api/sessions/{name}/summary   a short summary of its screen, written by Haiku (spends tokens)
     POST /api/sessions/{name}/freeze    pause it (nothing lost)
@@ -96,6 +97,11 @@ class StartRequest(BaseModel):
 class SendRequest(BaseModel):
     text: str | None = None
     key: str | None = None
+
+
+class AnswerRequest(BaseModel):
+    key: str
+    question: str
 
 
 class TaskRequest(BaseModel):
@@ -327,16 +333,16 @@ def create_app(config: Config, machine=None, sessions_api=sessions, run_watcher=
         return claude_screen.read(sessions_api.screen(name, lines=80))
 
     def read_states() -> dict[str, tuple[str, str | None]]:
-        """Every Claude session's state and question, as the page shows them; the notifier reads this.
-        A shell session is left out: it never needs me, and a program in it could draw something that
-        looks like a Claude menu."""
+        """Every Claude session's state, question and choices, as the page shows them; the notifier
+        reads this. A shell session is left out: it never needs me, and a program in it could draw
+        something that looks like a Claude menu."""
         found = {}
         for name in sessions_api.names():
             info = sessions_api.info(name)
             if info.program != "claude":
                 continue
             reading = state_of(name, info)
-            found[name] = (reading.state, reading.question)
+            found[name] = (reading.state, reading.question, tuple(reading.options))
         return found
 
     app.state.read_states = read_states
@@ -442,6 +448,21 @@ def create_app(config: Config, machine=None, sessions_api=sessions, run_watcher=
         except ValueError as error:
             raise HTTPException(400, str(error)) from error
         return {"sent": True}
+
+    @app.post("/api/sessions/{name}/answer")
+    def answer(name: str, body: AnswerRequest):
+        """A button on a notification (docs/decisions/0029). The notification may be minutes old, so
+        the key is pressed only if the same question with that choice is still on the screen;
+        otherwise nothing is typed and the answer is 409."""
+        _require_session(sessions_api, name)
+        _refuse_if_frozen(sessions_api, name)
+        reading = claude_screen.read(sessions_api.screen(name, lines=80))
+        if reading.state != "needs_you" or reading.question != body.question:
+            raise HTTPException(409, f"{name} is no longer asking that; open ollagi to see its screen")
+        if body.key not in {str(o.number) for o in reading.options}:
+            raise HTTPException(409, f"{name} no longer offers choice {body.key}; open ollagi to see its screen")
+        sessions_api.send_key(name, body.key)
+        return {"answered": body.key}
 
     @app.post("/api/sessions/{name}/summary")
     def summarise_session(name: str):

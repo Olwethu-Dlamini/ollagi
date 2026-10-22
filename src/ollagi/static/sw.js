@@ -11,7 +11,7 @@ self.addEventListener("activate", (event) => event.waitUntil(self.clients.claim(
 
 // ---- notifications (docs/decisions/0024) --------------------------------------------------------
 // The server encrypts each message to this browser (src/ollagi/webpush.py); the browser decrypts it
-// and hands it here as JSON: {title, body, tag, url, urgent}. A tag keeps one notification per
+// and hands it here as JSON: {title, body, tag, url, urgent, actions}. A tag keeps one notification per
 // session: a new one replaces the old, and renotify makes the phone buzz again for it. An urgent
 // one (a question waiting for me) stays on screen until it is tapped or dismissed.
 // The sound itself is the phone's: a page cannot choose one, only ask to vibrate (Android does;
@@ -26,7 +26,9 @@ self.addEventListener("push", (event) => {
       requireInteraction: Boolean(message.urgent),
       vibrate: message.urgent ? [200, 100, 200, 100, 200] : [200, 100, 200],
       icon: "/static/icon-192.png",
-      data: { url: message.url || "/" },
+      // Allow and Deny on a yes-or-no question (docs/decisions/0029): each is the number key to press.
+      actions: (message.actions || []).map(([key, title]) => ({ action: key, title })),
+      data: { url: message.url || "/", question: message.body },
     });
     // An open page plays a chime of its own (app.js), since the phone's sound may be off.
     for (const page of await self.clients.matchAll({ type: "window", includeUncontrolled: true })) {
@@ -36,9 +38,14 @@ self.addEventListener("push", (event) => {
 });
 
 // Tapping a notification: bring the open page forward and tell it what to show, or open a new one.
+// Tapping one of its buttons: answer the question from here, without opening the page.
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
   const url = event.notification.data?.url || "/";
+  if (event.action) {
+    event.waitUntil(answer(url, event.action, event.notification.data?.question || ""));
+    return;
+  }
   event.waitUntil((async () => {
     const [page] = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
     if (page) {
@@ -49,6 +56,27 @@ self.addEventListener("notificationclick", (event) => {
     }
   })());
 });
+
+// Press the chosen key in the session, only if it is still asking the same question (the server
+// checks). If it is not, say so in a new notification that opens the session.
+async function answer(url, key, question) {
+  const session = new URL(url, self.location.origin).searchParams.get("session");
+  let problem = null;
+  try {
+    const response = await fetch(`/api/sessions/${session}/answer`, {
+      method: "POST", headers: { "Content-Type": "application/json", "X-Ollagi": "1" },
+      body: JSON.stringify({ key, question }),
+    });
+    if (!response.ok) problem = (await response.json().catch(() => ({}))).detail || response.statusText;
+  } catch (error) {
+    problem = "the laptop could not be reached";
+  }
+  if (problem) {
+    await self.registration.showNotification(`${session}: not answered`, {
+      body: problem, tag: `session-${session}`, icon: "/static/icon-192.png", data: { url },
+    });
+  }
+}
 
 // The browser may replace a subscription by itself; then it gives the server the new one.
 self.addEventListener("pushsubscriptionchange", (event) => {
