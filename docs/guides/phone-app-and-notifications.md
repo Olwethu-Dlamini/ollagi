@@ -2,8 +2,8 @@
 
 This guide explains the whole feature in one place: what it does, how to set it up, how every piece
 works, how it was tested, what can go wrong, and answers to the questions people ask about it. The
-short records of each choice are in `docs/decisions/0022` (HTTPS), `0023` (the app) and `0024`
-(notifications); the ideas behind them (service workers, ECDH, HKDF, AES-GCM, VAPID) are explained
+short records of each choice are in `docs/decisions/0022` (HTTPS), `0023` (the app), `0024`
+(notifications) and `0028` (the sound); the ideas behind them (service workers, ECDH, HKDF, AES-GCM, VAPID) are explained
 in `docs/learning/README.md`.
 
 ## 1. What it does
@@ -22,7 +22,9 @@ in `docs/learning/README.md`.
   | The RAM watcher pauses, stops or resumes a session | "Memory low", with what it did | that session |
 
   Each session keeps at most one notification on the phone: a new one replaces the old one and
-  buzzes again.
+  buzzes again. A "needs you" stays on the screen until it is tapped or dismissed; the others clear
+  on their own. Every notification asks the phone to vibrate, and while the page is in front it
+  plays a short chime of its own (decision 0028). The notification's sound is the phone's setting.
 
 - **It costs no Claude tokens.** Nothing here calls Claude. The server only reads the screens tmux
   already has, the same way the page does.
@@ -101,7 +103,7 @@ In more detail:
    - **encrypt** (`webpush.encrypt`): a fresh key pair for this one message; ECDH with the phone's
      public key gives a shared secret; HKDF mixes it with the phone's auth secret and a random
      salt into an AES key and a nonce; AES-128-GCM encrypts the JSON message
-     `{title, body, tag, url}`;
+     `{title, body, tag, url, urgent}`;
    - **sign** (`webpush.vapid_authorization`): a JSON Web Token naming Google's push service and an
      expiry 12 hours ahead, signed with the server's key;
    - **POST** to the endpoint with `TTL: 21600` (Google keeps it up to 6 hours if the phone is off;
@@ -111,7 +113,8 @@ In more detail:
    is recorded in the card's event list.
 5. **On the phone**, Chrome decrypts the message and hands it to `sw.js`, which shows it with the
    ollagi icon. The `tag` (`session-api`, `queue`, `watcher`) makes a new notification replace the
-   last one with the same tag.
+   last one with the same tag. `urgent` (a "needs you") keeps it on screen until it is dealt with
+   and vibrates longer. `sw.js` then tells every open page, and a page in front plays its chime.
 6. **A tap**: `sw.js` brings the open ollagi forward and tells it which address to show, or opens
    ollagi at that address. `app.js` reads `?session=NAME` or `?view=queue`, opens it, and puts the
    address back to `/`.

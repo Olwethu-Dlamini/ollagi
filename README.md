@@ -38,6 +38,9 @@ Early. Built in small steps, one idea per commit, so every part can be read and 
 | 9c | Installable app on the phone | done |
 | 9d | Phone notifications through Web Push: needs you, finished, queue, RAM watcher | done |
 | 9e | Swipe to scroll back in a session's live terminal | done |
+| 9f | Whole frames to the phone (tmux `sync`), a calmer fit, WebGL drawing | done |
+| 9g | A plain terminal from the phone: Start a terminal, `ollagi start --shell` | done |
+| 9h | Notifications: a question stays on screen, vibration, a chime in the open page | done |
 
 ## Try it
 
