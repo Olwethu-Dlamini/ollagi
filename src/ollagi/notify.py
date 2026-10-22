@@ -54,12 +54,13 @@ class Notice:
     body: str
     tag: str  # the phone keeps only the newest notice per tag
     url: str  # where the page opens when the notice is tapped
+    urgent: bool = False  # a question waiting for me: the phone keeps it on screen until I tap it
 
 
 def session_notice(name: str, before: str, now: str, question: str | None) -> Notice | None:
     url = f"/?session={name}"
     if now == "needs_you":
-        return Notice(f"{name} needs you", question or "Claude is asking something.", f"session-{name}", url)
+        return Notice(f"{name} needs you", question or "Claude is asking something.", f"session-{name}", url, urgent=True)
     if now == "done" and before == "working":
         return Notice(f"{name} finished", "Claude's turn ended.", f"session-{name}", url)
     return None

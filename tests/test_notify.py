@@ -24,7 +24,8 @@ def test_a_question_is_announced_once_with_the_question():
     watch = SessionWatch()
     settle(watch, {"api": ("working", None)})
     found = settle(watch, {"api": ("needs_you", "Do you want to make this edit?")})
-    assert found == [Notice("api needs you", "Do you want to make this edit?", "session-api", "/?session=api")]
+    # Urgent: the phone keeps a question on screen until it is answered or dismissed.
+    assert found == [Notice("api needs you", "Do you want to make this edit?", "session-api", "/?session=api", urgent=True)]
     assert settle(watch, {"api": ("needs_you", "Do you want to make this edit?")}) == []
 
 
@@ -72,6 +73,7 @@ def test_queue_events_worth_a_notice():
 
 def test_watcher_actions_become_notices():
     assert notify.watcher_notice("freeze", "api") == Notice("Memory low", "Paused api to free memory.", "watcher", "/?session=api")
+    assert notify.watcher_notice("freeze", "api").urgent is False
     assert notify.watcher_notice("stop", "api").body == "Stopped api to free memory."
     assert notify.watcher_notice("thaw", "api").body == "Memory is back; api continues."
 
@@ -123,7 +125,8 @@ def test_a_notice_reaches_every_phone_and_a_forgotten_one_is_dropped(tmp_path):
     notifier = notify.Notifier(store, ec.generate_private_key(ec.SECP256R1()), send=send)
     result = notifier.deliver(Notice("api needs you", "Allow?", "session-api", "/?session=api"))
     assert result == {"sent": 1, "failed": []}
-    assert sent == [(kept, {"title": "api needs you", "body": "Allow?", "tag": "session-api", "url": "/?session=api"})]
+    assert sent == [(kept, {"title": "api needs you", "body": "Allow?", "tag": "session-api", "url": "/?session=api",
+                            "urgent": False})]
     assert store.all() == [kept]
 
 

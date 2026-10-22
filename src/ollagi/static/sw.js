@@ -11,14 +11,19 @@ self.addEventListener("activate", (event) => event.waitUntil(self.clients.claim(
 
 // ---- notifications (docs/decisions/0024) --------------------------------------------------------
 // The server encrypts each message to this browser (src/ollagi/webpush.py); the browser decrypts it
-// and hands it here as JSON: {title, body, tag, url}. A tag keeps one notification per session: a
-// new one replaces the old, and renotify makes the phone buzz again for it.
+// and hands it here as JSON: {title, body, tag, url, urgent}. A tag keeps one notification per
+// session: a new one replaces the old, and renotify makes the phone buzz again for it. An urgent
+// one (a question waiting for me) stays on screen until it is tapped or dismissed.
+// The sound itself is the phone's: a page cannot choose one, only ask to vibrate (Android does;
+// other browsers ignore it). Android decides from the app's notification settings.
 self.addEventListener("push", (event) => {
   const message = event.data ? event.data.json() : { title: "ollagi", body: "", tag: "ollagi", url: "/" };
   event.waitUntil(self.registration.showNotification(message.title, {
     body: message.body,
     tag: message.tag,
     renotify: true,
+    requireInteraction: Boolean(message.urgent),
+    vibrate: message.urgent ? [200, 100, 200, 100, 200] : [200, 100, 200],
     icon: "/static/icon-192.png",
     data: { url: message.url || "/" },
   }));
