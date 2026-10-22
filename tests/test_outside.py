@@ -3,6 +3,7 @@
 import json
 import os
 
+from ollagi import outside
 from ollagi.outside import list_sessions, parse_conversation, process_start, read_tail, transcript_path
 
 
@@ -101,3 +102,29 @@ def test_a_conversation_file_is_found_by_its_id_in_any_project_folder(tmp_path):
     assert transcript_path("abc-123", claude_home=tmp_path) == folder / "abc-123.jsonl"
     assert transcript_path("../etc", claude_home=tmp_path) is None
 
+
+
+def test_a_folders_recent_conversations_are_listed_newest_first_with_a_title(tmp_path):
+    import os
+
+    folder = outside.project_folder("/work/DATA!", claude_home=tmp_path)
+    assert folder == tmp_path / "projects" / "-work-DATA-"
+    folder.mkdir(parents=True)
+    named = folder / "aaaa-1.jsonl"
+    named.write_text("\n".join([
+        json.dumps({"type": "user", "message": {"role": "user", "content": "fix the budget test"}}),
+        json.dumps({"type": "ai-title", "aiTitle": "Budget test fix"}),
+    ]))
+    untitled = folder / "bbbb-2.jsonl"
+    untitled.write_text("\n".join([
+        json.dumps({"type": "user", "isMeta": True, "message": {"role": "user", "content": "<system>context</system>"}}),
+        json.dumps({"type": "user", "message": {"role": "user", "content": "look at the failing e2e checkout run\nmore"}}),
+    ]))
+    (folder / "cccc-3.jsonl").write_text("")  # an empty file: nothing to resume
+    os.utime(named, (1_000, 1_000))
+    os.utime(untitled, (2_000, 2_000))
+    found = outside.recent_conversations("/work/DATA!", claude_home=tmp_path)
+    assert [(c.session_id, c.title, c.updated) for c in found] == [
+        ("bbbb-2", "look at the failing e2e checkout run", 2_000.0), ("aaaa-1", "Budget test fix", 1_000.0)]
+    assert outside.recent_conversations("/nowhere", claude_home=tmp_path) == []
+    assert len(outside.recent_conversations("/work/DATA!", claude_home=tmp_path, limit=1)) == 1

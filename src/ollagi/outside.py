@@ -113,6 +113,54 @@ def list_sessions(claude_home: Path = CLAUDE_HOME, proc: Path = Path("/proc")) -
     return found
 
 
+@dataclass(frozen=True)
+class Conversation:
+    session_id: str
+    title: str
+    updated: float  # seconds, the file's last change
+
+
+def project_folder(directory: str, claude_home: Path = CLAUDE_HOME) -> Path:
+    """Where Claude Code keeps a folder's conversations: the path with every character that is not
+    a letter or digit turned into a dash ("/work/DATA!" -> "-work-DATA-"). Seen in 2.1.280."""
+    return claude_home / "projects" / re.sub(r"[^A-Za-z0-9]", "-", directory)
+
+
+def conversation_title(path: Path) -> str:
+    """The name Claude gave the conversation (the last "ai-title" entry), else its first typed line."""
+    title, items = parse_conversation(read_tail(path), limit=1)
+    if title:
+        return title
+    with path.open("rb") as f:
+        head = f.read(200_000).decode("utf-8", "replace").splitlines()
+    for line in head:
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            continue
+        content = (entry.get("message") or {}).get("content")
+        if entry.get("type") == "user" and not entry.get("isMeta") and isinstance(content, str):
+            item = user_item(content)
+            if item and item.role == "you":
+                return _first_line(item.text, 80)
+    return "(untitled)"
+
+
+def recent_conversations(directory: str, claude_home: Path = CLAUDE_HOME, limit: int = 8) -> list[Conversation]:
+    """A folder's most recent conversations, newest first, for `claude --resume` (docs/decisions/0033)."""
+    folder = project_folder(directory, claude_home)
+    if not folder.is_dir():
+        return []
+    files = sorted((f for f in folder.glob("*.jsonl") if f.stat().st_size > 0), key=lambda f: f.stat().st_mtime, reverse=True)
+    found = []
+    for path in files[:limit]:
+        try:
+            found.append(Conversation(path.stem, conversation_title(path), path.stat().st_mtime))
+        except OSError:
+            continue
+    return found
+
+
 def transcript_path(session_id: str, claude_home: Path = CLAUDE_HOME) -> Path | None:
     if not session_id or "/" in session_id:
         return None
