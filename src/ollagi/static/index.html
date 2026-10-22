@@ -145,7 +145,8 @@
 <div class="backdrop" id="new-sheet" hidden>
   <form class="sheet" id="new-form">
     <h2>New session</h2>
-    <input id="new-name" placeholder="name, e.g. sd-6641" required pattern="[a-z0-9][a-z0-9-]{0,31}" autocapitalize="off">
+    <!-- Optional: left empty, the session is named after the folder plus four characters (0030). -->
+    <input id="new-name" placeholder="name (optional), e.g. sd-6641" pattern="[a-z0-9][a-z0-9-]{0,31}" autocapitalize="off">
     <select id="new-project"></select>
     <input id="new-dir" placeholder="or a folder path" autocapitalize="off">
     <label class="muted"><input id="new-force" type="checkbox"> start even if memory is short</label>

@@ -186,10 +186,11 @@ $("new-form").onsubmit = async (event) => {
   // Which button sent the form: Start Claude, or Start a terminal (a shell in the folder).
   const program = event.submitter && event.submitter.id === "new-shell" ? "shell" : "claude";
   try {
-    await api("/api/sessions", { name: $("new-name").value.trim(), directory, force: $("new-force").checked, program });
+    const started = await api("/api/sessions", { name: $("new-name").value.trim(), directory, force: $("new-force").checked, program });
     $("new-sheet").hidden = true;
     $("new-name").value = "";
     await refreshSessions();
+    openViewer(started.started);  // straight into it, whatever it was named
   } catch (error) { $("new-error").textContent = error.message; }
 };
 

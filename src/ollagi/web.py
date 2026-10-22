@@ -39,6 +39,7 @@
 passes the real ones; tests pass fakes, so the API is tested without touching this laptop.
 """
 
+import secrets
 import subprocess
 import threading
 import time
@@ -88,7 +89,7 @@ def real_machine() -> SimpleNamespace:
 
 
 class StartRequest(BaseModel):
-    name: str
+    name: str = ""  # empty: named after the folder, like `ollagi here` (docs/decisions/0030)
     directory: str
     force: bool = False
     program: str = "claude"  # or "shell": a plain terminal in the folder (docs/decisions/0027)
@@ -391,14 +392,15 @@ def create_app(config: Config, machine=None, sessions_api=sessions, run_watcher=
             if not result.can_start:
                 raise HTTPException(409, f"no room for another session: {result.reason}")
         command = ["claude"] if body.program == "claude" else [sessions.login_shell()]
+        name = body.name.strip() or sessions.name_for(body.directory, sessions_api.names(), secrets.token_hex(2))
         try:
-            sessions_api.start(body.name, body.directory, command)
+            sessions_api.start(name, body.directory, command)
         except ValueError as error:
             raise HTTPException(400, str(error)) from error
         except RuntimeError as error:
             raise HTTPException(500, str(error)) from error
-        window = laptop.open(body.name) if config.desktop.open_on_start else False
-        return {"started": body.name, "window": window}
+        window = laptop.open(name) if config.desktop.open_on_start else False
+        return {"started": name, "window": window}
 
     @app.post("/api/sessions/{name}/desktop")
     def show_on_desktop(name: str):

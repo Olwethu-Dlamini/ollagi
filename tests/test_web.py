@@ -309,6 +309,15 @@ def test_start_is_refused_when_there_is_no_room_unless_forced(fake_sessions):
     assert forced.status_code == 200
 
 
+def test_a_session_started_without_a_name_is_named_after_its_folder(fake_sessions):
+    c = client(fake_sessions)
+    started = c.post("/api/sessions", json={"directory": "/work/Admin-Frontend"}, headers=CHANGE).json()
+    assert started["started"].startswith("admin-frontend-") and len(started["started"]) == len("admin-frontend-") + 4
+    assert started["started"] in fake_sessions.running
+    again = c.post("/api/sessions", json={"name": "  ", "directory": "/work/Admin-Frontend"}, headers=CHANGE).json()
+    assert again["started"] != started["started"]
+
+
 def test_a_shell_session_starts_my_login_shell_and_needs_no_room(fake_sessions, monkeypatch):
     # A plain terminal from the phone (docs/decisions/0027): a few MiB, so the Claude budget is not asked.
     monkeypatch.setattr("ollagi.sessions.login_shell", lambda: "/usr/bin/bash")
