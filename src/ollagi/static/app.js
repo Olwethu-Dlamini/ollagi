@@ -262,7 +262,8 @@ $("v-size").onclick = () => {
   try { localStorage.setItem("ollagi.font", String(fontSize)); } catch { /* private window: not remembered */ }
   applyFontSize();
 };
-applyFontSize();
+// Applied when a session opens (openViewer), not here: `live` is declared further down, and a
+// module stops dead at a variable read before its declaration.
 
 function openViewer(name) {
   if (name !== current) stopLive();
@@ -274,6 +275,7 @@ function openViewer(name) {
   $("v-menu").hidden = true;
   $("switcher").hidden = true;
   $("screen").textContent = "";
+  applyFontSize();
   refreshViewer();
   pollViewer();
 }
