@@ -35,7 +35,9 @@ class FakeSessions:
 
     def info(self, name):
         # Like the real one: a frozen session is reported from its record, without asking tmux.
-        program = getattr(self, "commands", {}).get(name, ["claude"])[0]
+        from ollagi.sessions import program_of
+
+        program = program_of(getattr(self, "commands", {}).get(name, ["claude"]))
         return SessionInfo(name, self.running[name], 4242, 1_000_000, True, 300 * MIB, 500 * MIB, name in self.frozen, program)
 
     def screen(self, name, lines=200, colours=False):
@@ -303,6 +305,20 @@ def test_start_is_refused_when_there_is_no_room_unless_forced(fake_sessions):
     assert refused.status_code == 409
     forced = c.post("/api/sessions", json={"name": "sd-2", "directory": "/w", "force": True}, headers=CHANGE)
     assert forced.status_code == 200
+
+
+def test_a_shell_session_starts_my_login_shell_and_needs_no_room(fake_sessions, monkeypatch):
+    # A plain terminal from the phone (docs/decisions/0027): a few MiB, so the Claude budget is not asked.
+    monkeypatch.setattr("ollagi.sessions.login_shell", lambda: "/usr/bin/bash")
+    c = client(fake_sessions, available_gib=1.0)
+    started = c.post("/api/sessions", json={"name": "sh-1", "directory": "/w", "program": "shell"}, headers=CHANGE)
+    assert started.status_code == 200
+    assert fake_sessions.commands["sh-1"] == ["/usr/bin/bash"]
+    listed = next(s for s in c.get("/api/sessions").json() if s["name"] == "sh-1")
+    assert listed["program"] == "bash"
+    assert next(s for s in c.get("/api/sessions").json() if s["name"] == "demo")["program"] == "claude"
+    refused = c.post("/api/sessions", json={"name": "sh-2", "directory": "/w", "program": "python"}, headers=CHANGE)
+    assert refused.status_code == 400
 
 
 def test_changes_without_the_ollagi_header_are_refused(fake_sessions):

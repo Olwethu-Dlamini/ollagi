@@ -128,6 +128,13 @@ def start(name: str, directory: str, command: Sequence[str] = ("claude",), run: 
                        "program": program_of(command)})
 
 
+def login_shell() -> str:
+    """My login shell from the password database (the service has no SHELL in its environment)."""
+    import pwd
+
+    return pwd.getpwuid(os.getuid()).pw_shell or "bash"
+
+
 def program_of(command: Sequence[str]) -> str:
     """The name of what a session runs: "claude" for `claude --resume ...`, "bash" for a shell."""
     return Path(command[0]).name if command else "claude"

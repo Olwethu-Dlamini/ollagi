@@ -4,7 +4,7 @@
     GET  /api/system                    memory, pressure, load, disks, heavy processes, Claude sessions
     GET  /api/sessions                  ollagi sessions with their state and memory
     GET  /api/sessions/{name}/screen    the end of a session's screen, as text
-    POST /api/sessions                  start a session   {"name", "directory", "force"}
+    POST /api/sessions                  start a session   {"name", "directory", "force", "program": "claude" | "shell"}
     POST /api/sessions/{name}/send      type into it      {"text"} or {"key"}
     POST /api/sessions/{name}/stop      stop it
     POST /api/sessions/{name}/summary   a short summary of its screen, written by Haiku (spends tokens)
@@ -90,6 +90,7 @@ class StartRequest(BaseModel):
     name: str
     directory: str
     force: bool = False
+    program: str = "claude"  # or "shell": a plain terminal in the folder (docs/decisions/0027)
 
 
 class SendRequest(BaseModel):
@@ -369,13 +370,18 @@ def create_app(config: Config, machine=None, sessions_api=sessions, run_watcher=
 
     @app.post("/api/sessions")
     def start_session(body: StartRequest):
-        if not body.force:
+        if body.program not in ("claude", "shell"):
+            raise HTTPException(400, "program must be \"claude\" or \"shell\"")
+        # A shell is a few MiB and is not a Claude session, so the budget (made for Claude's 1.5 GiB)
+        # does not apply to it.
+        if body.program == "claude" and not body.force:
             memory, load = machine.memory(), machine.load()
             result = verdict(memory, load, find_sessions(machine.processes()))
             if not result.can_start:
                 raise HTTPException(409, f"no room for another session: {result.reason}")
+        command = ["claude"] if body.program == "claude" else [sessions.login_shell()]
         try:
-            sessions_api.start(body.name, body.directory)
+            sessions_api.start(body.name, body.directory, command)
         except ValueError as error:
             raise HTTPException(400, str(error)) from error
         except RuntimeError as error:

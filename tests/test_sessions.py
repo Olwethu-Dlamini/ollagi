@@ -115,6 +115,12 @@ def test_a_session_remembers_what_it_runs():
     assert sessions.program_of([]) == "claude"
 
 
+def test_the_login_shell_comes_from_the_password_database():
+    import pwd
+
+    assert sessions.login_shell() == (pwd.getpwuid(os.getuid()).pw_shell or "bash")
+
+
 def test_a_saved_record_round_trips(tmp_path):
     sessions.save_record("demo", {"directory": "/w", "created": 5}, state_dir=tmp_path)
     assert sessions.load_record("demo", state_dir=tmp_path) == {"directory": "/w", "created": 5}
