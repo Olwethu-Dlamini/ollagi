@@ -509,9 +509,12 @@ async function startLive() {
     term.onResize(({ rows, cols }) => send({ type: "resize", rows, cols }));
 
     // Rotating the phone or opening the keyboard changes the box; fit the terminal to it again.
-    const observer = new ResizeObserver(() => fitter.fit());
+    // The keyboard slides over several frames and the box changes with each. Every fit resizes
+    // the session and makes Claude redraw the whole screen, so wait until the box has held still.
+    const fit = whenStill(() => fitter.fit(), 150);
+    const observer = new ResizeObserver(fit);
     observer.observe($("live"));
-    live = { term, socket, observer };
+    live = { term, socket, observer, fit };
     $("v-live").textContent = "Show a copy of the screen";
     pollViewer();
   } finally {
@@ -558,11 +561,20 @@ function swipeToScroll(term) {
   return state;
 }
 
+// Runs `action` once `ms` have passed with no new call (a fit after the last resize, not each one).
+function whenStill(action, ms) {
+  let timer = null;
+  const call = () => { clearTimeout(timer); timer = setTimeout(action, ms); };
+  call.cancel = () => clearTimeout(timer);
+  return call;
+}
+
 function stopLive() {
   if (!live) return;
   const was = live;
   live = null;
   was.observer.disconnect();
+  was.fit.cancel();  // a fit still pending would reach a terminal that is gone
   was.socket.close();  // the server hangs up `tmux attach`; the session keeps running
   was.term.dispose();
   $("live").hidden = true;
