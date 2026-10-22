@@ -117,3 +117,31 @@ def test_the_laptop_window_count_recognises_a_browser_terminal_from_its_real_env
 
     term = opened(["sleep", "5"])
     assert desktop.in_browser(term.process.pid)
+
+
+needs_tmux = pytest.mark.skipif(not __import__("shutil").which("tmux"), reason="needs tmux")
+
+
+@needs_tmux
+def test_tmux_sends_the_browser_terminal_whole_frames(opened, tmp_path):
+    """Claude Code wraps each redraw in synchronized-update marks (ESC [ ? 2026 h ... l). tmux only
+    passes them to a terminal its terminal-features list as supporting "sync"; ollagi's tmux.conf
+    says so for xterm-256color, which is what the browser's terminal calls itself
+    (docs/decisions/0026)."""
+    import os
+    import subprocess
+
+    from ollagi.sessions import TMUX_CONF
+
+    socket = f"ollagi-synctest-{os.getpid()}"
+    # The program marks a frame the way Claude Code does, then waits.
+    program = "printf '\\033[?2026hframe one\\033[?2026l'; sleep 30"
+    subprocess.run(["tmux", "-f", str(TMUX_CONF), "-L", socket, "new-session", "-d", "-s", "main", "--", "sh", "-c", program],
+                   check=True, env={**os.environ, "TMUX": ""})
+    try:
+        term = opened(["tmux", "-L", socket, "attach-session", "-t", "main"], rows=24, cols=80)
+        seen = output_until(term, "frame one")
+        assert "frame one" in seen
+        assert "\x1b[?2026h" in seen and "\x1b[?2026l" in seen
+    finally:
+        subprocess.run(["tmux", "-L", socket, "kill-server"], check=False)
