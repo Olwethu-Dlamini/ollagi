@@ -17,7 +17,8 @@ A conversation ends with its session (a reboot, a stop, the RAM watcher). From t
   Claude gave it (the last `ai-title` entry) or else its first typed line, and the file's last
   change. Empty files are skipped.
 - `GET /api/conversations?directory=` offers them, newest first, leaving out any conversation
-  open in a terminal window right now (0016's list).
+  running right now: Claude Code's own session files (0016) list every running Claude, in a
+  window or in an ollagi session, so neither is offered twice.
 - The New sheet shows them once a folder is chosen: "start a new conversation" first, then
   "resume: title (age ago)". Picking one starts `claude --resume ID`.
 - The server accepts only an id from that same list, never an arbitrary word on claude's command
@@ -28,8 +29,7 @@ A conversation ends with its session (a reboot, a stop, the RAM watcher). From t
 
 - The project folder encoding is Claude Code's internal choice; if it changes, the list is empty
   and nothing else breaks.
-- A conversation open in an ollagi session is not excluded (its id is not known to the list);
-  resuming it twice is Claude's own behaviour.
+- The folder of this very session, with one conversation file, offers nothing while it runs.
 - Undo: remove the picker, the route and `resume` from `StartRequest`.
 
 ## Checked
