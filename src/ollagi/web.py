@@ -383,10 +383,19 @@ def create_app(config: Config, machine=None, sessions_api=sessions, run_watcher=
             "windows": laptop.count(name),
         }
 
+    def resumable(directory: str):
+        """A folder's recent conversations that are not open in a window right now."""
+        running = {s.session_id for s in outside_api.list_sessions()}
+        return [c for c in outside_api.recent_conversations(directory) if c.session_id not in running]
+
     @app.post("/api/sessions")
     def start_session(body: StartRequest):
         if body.program not in ("claude", "shell"):
             raise HTTPException(400, "program must be \"claude\" or \"shell\"")
+        # Checked before the budget, so a bad request is refused as bad even when memory is short.
+        if body.resume and (body.program != "claude" or body.resume not in {c.session_id for c in resumable(body.directory)}):
+            # Only an id the folder's own list offers: never an arbitrary word on claude's command line.
+            raise HTTPException(400, "resume must name one of the folder's recent conversations")
         # A shell is a few MiB and is not a Claude session, so the budget (made for Claude's 1.5 GiB)
         # does not apply to it.
         if body.program == "claude" and not body.force:
@@ -402,9 +411,6 @@ def create_app(config: Config, machine=None, sessions_api=sessions, run_watcher=
                     return {"started": name, "window": False, "reused": True}
         command = ["claude"] if body.program == "claude" else [sessions.login_shell()]
         if body.resume:
-            # Only an id the folder's own list offers: never an arbitrary word on claude's command line.
-            if body.program != "claude" or body.resume not in {c.session_id for c in resumable(body.directory)}:
-                raise HTTPException(400, "resume must name one of the folder's recent conversations")
             command = ["claude", "--resume", body.resume]
         name = body.name.strip() or sessions.name_for(body.directory, sessions_api.names(), secrets.token_hex(2))
         try:
@@ -583,11 +589,6 @@ def create_app(config: Config, machine=None, sessions_api=sessions, run_watcher=
         managed = {s.pid for s in find_sessions(machine.processes()) if _is_managed(machine, s.pid)}
         memory = {s.pid: s.tree_rss for s in find_sessions(machine.processes())}
         return [s for s in outside_api.list_sessions() if s.pid not in managed], memory
-
-    def resumable(directory: str):
-        """A folder's recent conversations that are not open in a window right now."""
-        running = {s.session_id for s in outside_api.list_sessions()}
-        return [c for c in outside_api.recent_conversations(directory) if c.session_id not in running]
 
     @app.get("/api/conversations")
     def conversations(directory: str):

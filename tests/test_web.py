@@ -329,6 +329,9 @@ def test_a_recent_conversation_can_be_resumed_from_the_sheet_but_not_an_arbitrar
                 {"directory": "/work/DATA!/api", "resume": "--dangerous"},       # not a conversation at all
                 {"directory": "/work/DATA!/api", "resume": "conv-2", "program": "shell"}):
         assert c.post("/api/sessions", json=bad, headers=CHANGE).status_code == 400
+    # A bad id is bad before the budget is asked: with memory short it is still 400, not 409.
+    short = client(fake_sessions, available_gib=1.0)
+    assert short.post("/api/sessions", json={"directory": "/work/DATA!/api", "resume": "nope"}, headers=CHANGE).status_code == 400
 
 
 def test_a_session_started_without_a_name_is_named_after_its_folder(fake_sessions):
