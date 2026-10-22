@@ -327,10 +327,15 @@ def create_app(config: Config, machine=None, sessions_api=sessions, run_watcher=
         return claude_screen.read(sessions_api.screen(name, lines=80))
 
     def read_states() -> dict[str, tuple[str, str | None]]:
-        """Every session's state and question, as the page shows them; the notifier reads this."""
+        """Every Claude session's state and question, as the page shows them; the notifier reads this.
+        A shell session is left out: it never needs me, and a program in it could draw something that
+        looks like a Claude menu."""
         found = {}
         for name in sessions_api.names():
-            reading = state_of(name, sessions_api.info(name))
+            info = sessions_api.info(name)
+            if info.program != "claude":
+                continue
+            reading = state_of(name, info)
             found[name] = (reading.state, reading.question)
         return found
 

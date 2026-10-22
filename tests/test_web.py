@@ -746,3 +746,10 @@ def test_the_server_reads_session_states_for_the_notifier(fake_sessions):
     assert c.app.state.read_states() == {"demo": ("needs_you", "Do you want to make this edit?")}
     fake_sessions.freeze("demo")
     assert c.app.state.read_states() == {"demo": ("frozen", None)}
+
+
+def test_a_shell_session_never_notifies(fake_sessions):
+    fake_sessions.start("sh-1", "/w", ["bash"])
+    fake_sessions.screens["sh-1"] = "\n".join(["Do you want to make this edit?", "❯ 1. Yes", "  2. No"])
+    c = client(fake_sessions)
+    assert "sh-1" not in c.app.state.read_states()
