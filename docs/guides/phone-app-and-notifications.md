@@ -23,7 +23,9 @@ in `docs/learning/README.md`.
 
   Each session keeps at most one notification on the phone: a new one replaces the old one and
   buzzes again. A "needs you" stays on the screen until it is tapped or dismissed; the others clear
-  on their own. Every notification asks the phone to vibrate, and while the page is in front it
+  on their own. A yes-or-no question (a permission, the trust prompt) has **Allow** and **Deny**
+  buttons on the notification: a tap answers it without opening the app, and only if the same
+  question is still on the screen (decision 0029); otherwise a new notification says so. Every notification asks the phone to vibrate, and while the page is in front it
   plays a short chime of its own (decision 0028). The notification's sound is the phone's setting.
 
 - **It costs no Claude tokens.** Nothing here calls Claude. The server only reads the screens tmux
@@ -130,6 +132,7 @@ delivery, usually a second or two.
 | `POST /api/push/subscribe` | Store a device `{"endpoint", "keys": {"p256dh", "auth"}}` |
 | `POST /api/push/unsubscribe` | Forget a device `{"endpoint"}` |
 | `POST /api/push/test` | Send a test to every device (409 when none is on) |
+| `POST /api/sessions/NAME/answer` | A notification button: `{"key", "question"}`; presses the key only if that question is still on screen, else 409 |
 | `GET /manifest.webmanifest`, `GET /sw.js` | The manifest and the service worker |
 
 ## 4. Security and privacy

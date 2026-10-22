@@ -41,6 +41,9 @@ Early. Built in small steps, one idea per commit, so every part can be read and 
 | 9f | Whole frames to the phone (tmux `sync`), a calmer fit, WebGL drawing | done |
 | 9g | A plain terminal from the phone: Start a terminal, `ollagi start --shell` | done |
 | 9h | Notifications: a question stays on screen, vibration, a chime in the open page | done |
+| 9i | Allow and Deny on the notification itself, pressed only if the question is still on screen | done |
+| 9j | Sessions named after their folder when no name is typed; one scratch shell per folder | done |
+| 9k | Text size for the screen; resume an earlier conversation from the New sheet | done |
 
 ## Try it
 

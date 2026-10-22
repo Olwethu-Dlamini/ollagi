@@ -23,21 +23,4 @@ with linger off, so after a reboot it starts only once I log in. A reboot also e
 
 ## From the phone, 2026-10-22
 
-- **Answer a permission from the notification itself.** Allow and Deny buttons on a "needs you"
-  notification (Notification `actions`); the service worker would POST the key to
-  `/api/sessions/NAME/send`. Saves opening the app for a plain yes. Undo: remove the actions.
-  Cost: a tap on the wrong button answers Claude without seeing the screen; the body text is cut
-  to 500 characters, so the question may be incomplete.
-- **Auto-name sessions started from the phone.** Leave the name empty and get
-  `<folder>-<4 characters>` as `ollagi here` does. Undo: make the field required again.
-- **A smaller font in the live terminal.** At 11 px the phone gives about 48 columns and Claude's
-  boxes break; 9 px would give about 58, and a landscape phone about 100. A size button in the ⋯
-  menu, remembered on the device. Undo: remove the button; the size falls back to 11.
-- **Resume an earlier Claude conversation from the phone.** The New sheet could list recent
-  conversations from Claude's own files (0016 already reads them) and start
-  `claude --resume ID`. Undo: remove the list.
-- **Stop redrawing the session list behind an open session.** `tick` rebuilds the list every 4 s
-  while the viewer covers it. Keep fetching (the switcher needs it), skip the DOM work. Undo: one
-  condition.
-- **One scratch shell per project.** Start a terminal could reuse a running shell session in the
-  same folder instead of making another. Undo: always start a new one.
+All six taken up the same day: decisions 0029 to 0034.
