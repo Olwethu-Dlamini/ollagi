@@ -221,6 +221,29 @@ function readViewMode() {
 }
 let viewMode = readViewMode();  // remembered on this device only
 
+// Text size of the screen (docs/decisions/0032). At 11 px a phone gives about 48 columns and
+// Claude's boxes break; 9 px gives about 58. The ⋯ menu cycles through the sizes; the choice is
+// remembered on this device. The phone starts at 11, the laptop at 13.
+const FONT_SIZES = [9, 11, 13, 15];
+function readFontSize() {
+  const fallback = window.innerWidth < 600 ? 11 : 13;
+  try { const saved = Number(localStorage.getItem("ollagi.font")); return FONT_SIZES.includes(saved) ? saved : fallback; }
+  catch { return fallback; }
+}
+let fontSize = readFontSize();
+
+function applyFontSize() {
+  $("screen").style.fontSize = `${fontSize}px`;
+  $("v-size").textContent = `Text size: ${fontSize} px`;
+  if (live) { live.term.options.fontSize = fontSize; live.fit(); }
+}
+$("v-size").onclick = () => {
+  fontSize = FONT_SIZES[(FONT_SIZES.indexOf(fontSize) + 1) % FONT_SIZES.length];
+  try { localStorage.setItem("ollagi.font", String(fontSize)); } catch { /* private window: not remembered */ }
+  applyFontSize();
+};
+applyFontSize();
+
 function openViewer(name) {
   if (name !== current) stopLive();
   current = name;
@@ -506,7 +529,7 @@ async function startLive() {
     const styles = getComputedStyle(document.documentElement);
     const term = new Terminal({
       fontFamily: styles.getPropertyValue("--mono") || "monospace",
-      fontSize: window.innerWidth < 600 ? 11 : 13,
+      fontSize,
       cursorBlink: true,
       theme: { background: styles.getPropertyValue("--screen-bg").trim(), foreground: styles.getPropertyValue("--screen-text").trim() },
     });
