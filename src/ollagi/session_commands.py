@@ -22,13 +22,14 @@ from ollagi.system import MIB, read_load, read_memory
 
 
 def cmd_start(args) -> int:
-    if not args.force:
+    # A shell is a few MiB, not a Claude session: the budget is not asked (docs/decisions/0027).
+    if not args.force and not args.shell:
         running = [s.tree_rss for s in find_sessions(read_processes())]
         verdict = how_many_can_start(read_memory(), read_load(), running, Limits())
         if not verdict.can_start:
             print(f"not starting: {verdict.reason}\n(use --force to start anyway)")
             return 1
-    command = args.command or ["claude"]
+    command = [sessions.login_shell()] if args.shell else (args.command or ["claude"])
     sessions.start(args.name, args.directory, command)
     print(f"started {args.name} in {args.directory}: {' '.join(command)}")
     settings = config.load().desktop
@@ -119,6 +120,7 @@ def add_to(subparsers) -> None:
     p.add_argument("directory", help="the project folder to start in")
     p.add_argument("--force", action="store_true", help="start even if the budget says there is no room")
     p.add_argument("--no-window", action="store_true", help="do not open a terminal window on the desktop")
+    p.add_argument("--shell", action="store_true", help="a plain terminal (my login shell) instead of claude; needs no room")
     p.add_argument("command", nargs="*", help="program to run instead of claude, after --")
     p.set_defaults(handler=cmd_start)
 
