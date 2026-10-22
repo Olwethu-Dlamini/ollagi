@@ -391,6 +391,12 @@ def create_app(config: Config, machine=None, sessions_api=sessions, run_watcher=
             result = verdict(memory, load, find_sessions(machine.processes()))
             if not result.can_start:
                 raise HTTPException(409, f"no room for another session: {result.reason}")
+        if body.program == "shell":
+            # One scratch shell per folder (docs/decisions/0031): a running one is handed back.
+            for name in sessions_api.names():
+                info = sessions_api.info(name)
+                if info.program != "claude" and info.directory == body.directory and info.alive and not info.frozen:
+                    return {"started": name, "window": False, "reused": True}
         command = ["claude"] if body.program == "claude" else [sessions.login_shell()]
         name = body.name.strip() or sessions.name_for(body.directory, sessions_api.names(), secrets.token_hex(2))
         try:

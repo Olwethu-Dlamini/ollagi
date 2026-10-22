@@ -330,6 +330,12 @@ def test_a_shell_session_starts_my_login_shell_and_needs_no_room(fake_sessions, 
     assert next(s for s in c.get("/api/sessions").json() if s["name"] == "demo")["program"] == "claude"
     refused = c.post("/api/sessions", json={"name": "sh-2", "directory": "/w", "program": "python"}, headers=CHANGE)
     assert refused.status_code == 400
+    # One scratch shell per folder: asking again hands back the running one; another folder gets its own.
+    again = c.post("/api/sessions", json={"name": "sh-3", "directory": "/w", "program": "shell"}, headers=CHANGE).json()
+    assert again == {"started": "sh-1", "window": False, "reused": True}
+    assert "sh-3" not in fake_sessions.running
+    other = c.post("/api/sessions", json={"directory": "/other", "program": "shell"}, headers=CHANGE).json()
+    assert other.get("reused") is None and other["started"] in fake_sessions.running
 
 
 def test_changes_without_the_ollagi_header_are_refused(fake_sessions):
