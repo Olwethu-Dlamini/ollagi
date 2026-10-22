@@ -149,6 +149,8 @@
     <input id="new-name" placeholder="name (optional), e.g. sd-6641" pattern="[a-z0-9][a-z0-9-]{0,31}" autocapitalize="off">
     <select id="new-project"></select>
     <input id="new-dir" placeholder="or a folder path" autocapitalize="off">
+    <!-- The folder's recent conversations, from Claude's own files, to pick one up again (0033). -->
+    <select id="new-resume" hidden></select>
     <label class="muted"><input id="new-force" type="checkbox"> start even if memory is short</label>
     <div class="error" id="new-error"></div>
     <button class="primary" type="submit" id="new-claude">Start Claude</button>

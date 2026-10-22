@@ -4,7 +4,8 @@
     GET  /api/system                    memory, pressure, load, disks, heavy processes, Claude sessions
     GET  /api/sessions                  ollagi sessions with their state and memory
     GET  /api/sessions/{name}/screen    the end of a session's screen, as text
-    POST /api/sessions                  start a session   {"name", "directory", "force", "program": "claude" | "shell"}
+    POST /api/sessions                  start a session   {"name", "directory", "force", "program": "claude" | "shell",
+                                                           "resume": a conversation id from /api/conversations}
     POST /api/sessions/{name}/send      type into it      {"text"} or {"key"}
     POST /api/sessions/{name}/answer    press a menu key, only if that question is still on screen {"key", "question"}
     POST /api/sessions/{name}/stop      stop it
@@ -20,6 +21,7 @@
     GET  /api/jira/groups               my open Jira tickets, grouped (read only, cached 5 minutes)
     POST /api/jira/queue                queue chosen tickets as one task {"keys", "directory"}
     GET  /api/outside                   Claude sessions started outside ollagi (from Claude's own files)
+    GET  /api/conversations?directory=  a folder's recent Claude conversations, to resume one
     GET  /api/outside/{pid}/conversation   that session's recent conversation, read only
     POST /api/outside/{pid}/takeover    end it in its window, reopen it in ollagi {"confirm_name"}
     GET  /api/slack/drafts              the Slack outbox
@@ -93,6 +95,7 @@ class StartRequest(BaseModel):
     directory: str
     force: bool = False
     program: str = "claude"  # or "shell": a plain terminal in the folder (docs/decisions/0027)
+    resume: str | None = None  # a conversation id from /api/conversations: `claude --resume` (0033)
 
 
 class SendRequest(BaseModel):
@@ -398,6 +401,11 @@ def create_app(config: Config, machine=None, sessions_api=sessions, run_watcher=
                 if info.program != "claude" and info.directory == body.directory and info.alive and not info.frozen:
                     return {"started": name, "window": False, "reused": True}
         command = ["claude"] if body.program == "claude" else [sessions.login_shell()]
+        if body.resume:
+            # Only an id the folder's own list offers: never an arbitrary word on claude's command line.
+            if body.program != "claude" or body.resume not in {c.session_id for c in resumable(body.directory)}:
+                raise HTTPException(400, "resume must name one of the folder's recent conversations")
+            command = ["claude", "--resume", body.resume]
         name = body.name.strip() or sessions.name_for(body.directory, sessions_api.names(), secrets.token_hex(2))
         try:
             sessions_api.start(name, body.directory, command)
@@ -575,6 +583,16 @@ def create_app(config: Config, machine=None, sessions_api=sessions, run_watcher=
         managed = {s.pid for s in find_sessions(machine.processes()) if _is_managed(machine, s.pid)}
         memory = {s.pid: s.tree_rss for s in find_sessions(machine.processes())}
         return [s for s in outside_api.list_sessions() if s.pid not in managed], memory
+
+    def resumable(directory: str):
+        """A folder's recent conversations that are not open in a window right now."""
+        running = {s.session_id for s in outside_api.list_sessions()}
+        return [c for c in outside_api.recent_conversations(directory) if c.session_id not in running]
+
+    @app.get("/api/conversations")
+    def conversations(directory: str):
+        now = time.time()
+        return {"conversations": [{**asdict(c), "age_seconds": int(now - c.updated)} for c in resumable(directory)]}
 
     @app.get("/api/outside")
     def list_outside():

@@ -181,6 +181,25 @@ async function takeOver(s) {
 
 // ---- new session sheet ------------------------------------------------------------------------
 $("new-open").onclick = () => { $("new-error").textContent = ""; $("new-sheet").hidden = false; $("new-name").focus(); };
+
+// Resume (docs/decisions/0033): once a folder is chosen, its recent conversations are offered; the
+// first choice is a fresh start. Conversations open in a window right now are not in the list.
+async function offerConversations() {
+  const directory = $("new-dir").value.trim() || $("new-project").value;
+  const select = $("new-resume");
+  select.hidden = true;
+  select.replaceChildren();
+  if (!directory) return;
+  let found;
+  try { found = (await api(`/api/conversations?directory=${encodeURIComponent(directory)}`)).conversations; }
+  catch { return; }
+  if (directory !== ($("new-dir").value.trim() || $("new-project").value) || !found.length) return;  // the choice moved on
+  select.append(Object.assign(el("option", "start a new conversation"), { value: "" }));
+  for (const c of found) select.append(Object.assign(el("option", `resume: ${c.title}  (${age(c.age_seconds)} ago)`), { value: c.session_id }));
+  select.hidden = false;
+}
+$("new-project").onchange = offerConversations;
+$("new-dir").onchange = offerConversations;
 $("new-cancel").onclick = () => ($("new-sheet").hidden = true);
 $("new-form").onsubmit = async (event) => {
   event.preventDefault();
@@ -190,7 +209,8 @@ $("new-form").onsubmit = async (event) => {
   // Which button sent the form: Start Claude, or Start a terminal (a shell in the folder).
   const program = event.submitter && event.submitter.id === "new-shell" ? "shell" : "claude";
   try {
-    const started = await api("/api/sessions", { name: $("new-name").value.trim(), directory, force: $("new-force").checked, program });
+    const resume = program === "claude" ? $("new-resume").value || null : null;
+    const started = await api("/api/sessions", { name: $("new-name").value.trim(), directory, force: $("new-force").checked, program, resume });
     $("new-sheet").hidden = true;
     $("new-name").value = "";
     await refreshSessions();

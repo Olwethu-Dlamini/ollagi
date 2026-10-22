@@ -153,6 +153,13 @@ class FakeOutside:
     def transcript_path(self, session_id):
         return Path("/nowhere.jsonl")
 
+    def recent_conversations(self, directory):
+        from ollagi.outside import Conversation
+
+        if directory != "/work/DATA!/api":
+            return []
+        return [Conversation("conv-2", "Fix the budget test", 2000.0), Conversation("conv-1", "Older one, open in a window", 1000.0)]
+
     def read_tail(self, path):
         return ['{"type": "user", "message": {"content": "hello"}}']
 
@@ -307,6 +314,21 @@ def test_start_is_refused_when_there_is_no_room_unless_forced(fake_sessions):
     assert refused.status_code == 409
     forced = c.post("/api/sessions", json={"name": "sd-2", "directory": "/w", "force": True}, headers=CHANGE)
     assert forced.status_code == 200
+
+
+def test_a_recent_conversation_can_be_resumed_from_the_sheet_but_not_an_arbitrary_id(fake_sessions):
+    # docs/decisions/0033. conv-1 is open in a terminal window right now, so it is not offered.
+    c = client(fake_sessions)
+    offered = c.get("/api/conversations", params={"directory": "/work/DATA!/api"}).json()["conversations"]
+    assert [(x["session_id"], x["title"]) for x in offered] == [("conv-2", "Fix the budget test")]
+    assert c.get("/api/conversations", params={"directory": "/elsewhere"}).json() == {"conversations": []}
+    ok = c.post("/api/sessions", json={"directory": "/work/DATA!/api", "resume": "conv-2"}, headers=CHANGE)
+    assert ok.status_code == 200
+    assert fake_sessions.commands[ok.json()["started"]] == ["claude", "--resume", "conv-2"]
+    for bad in ({"directory": "/work/DATA!/api", "resume": "conv-1"},            # open in a window
+                {"directory": "/work/DATA!/api", "resume": "--dangerous"},       # not a conversation at all
+                {"directory": "/work/DATA!/api", "resume": "conv-2", "program": "shell"}):
+        assert c.post("/api/sessions", json=bad, headers=CHANGE).status_code == 400
 
 
 def test_a_session_started_without_a_name_is_named_after_its_folder(fake_sessions):
