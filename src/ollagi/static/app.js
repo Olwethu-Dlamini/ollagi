@@ -946,7 +946,37 @@ if (location.search) {
 }
 navigator.serviceWorker?.addEventListener("message", (event) => {
   if (event.data?.type === "open") follow(event.data.url);
+  if (event.data?.type === "notice") chime(event.data.urgent);
 });
+
+// ---- a chime when a notification arrives while the page is open ----------------------------------
+// The phone's own sound for a notification is a phone setting, and often off. While the page is in
+// front it plays a short chime itself: two rising tones, three for a question. Browsers only let a
+// page make sound after a tap, so the sound system is opened on the first one and kept.
+let audio = null;
+function openAudio() {
+  if (audio || !window.AudioContext) return;
+  audio = new AudioContext();
+}
+window.addEventListener("pointerdown", openAudio, { once: true, passive: true });
+window.addEventListener("keydown", openAudio, { once: true, passive: true });
+
+function chime(urgent) {
+  if (!audio || document.visibilityState !== "visible") return;  // in the background the notification itself is the signal
+  if (audio.state === "suspended") audio.resume();
+  const notes = urgent ? [660, 880, 1100] : [660, 880];
+  notes.forEach((hz, i) => {
+    const tone = audio.createOscillator(), gain = audio.createGain();
+    const at = audio.currentTime + i * 0.14;
+    tone.frequency.value = hz;
+    gain.gain.setValueAtTime(0.0001, at);
+    gain.gain.exponentialRampToValueAtTime(0.2, at + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.12);
+    tone.connect(gain).connect(audio.destination);
+    tone.start(at);
+    tone.stop(at + 0.13);
+  });
+}
 
 // ---- keep everything fresh -----------------------------------------------------------------------
 async function tick() {

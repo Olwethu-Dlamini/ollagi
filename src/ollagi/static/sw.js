@@ -18,15 +18,21 @@ self.addEventListener("activate", (event) => event.waitUntil(self.clients.claim(
 // other browsers ignore it). Android decides from the app's notification settings.
 self.addEventListener("push", (event) => {
   const message = event.data ? event.data.json() : { title: "ollagi", body: "", tag: "ollagi", url: "/" };
-  event.waitUntil(self.registration.showNotification(message.title, {
-    body: message.body,
-    tag: message.tag,
-    renotify: true,
-    requireInteraction: Boolean(message.urgent),
-    vibrate: message.urgent ? [200, 100, 200, 100, 200] : [200, 100, 200],
-    icon: "/static/icon-192.png",
-    data: { url: message.url || "/" },
-  }));
+  event.waitUntil((async () => {
+    await self.registration.showNotification(message.title, {
+      body: message.body,
+      tag: message.tag,
+      renotify: true,
+      requireInteraction: Boolean(message.urgent),
+      vibrate: message.urgent ? [200, 100, 200, 100, 200] : [200, 100, 200],
+      icon: "/static/icon-192.png",
+      data: { url: message.url || "/" },
+    });
+    // An open page plays a chime of its own (app.js), since the phone's sound may be off.
+    for (const page of await self.clients.matchAll({ type: "window", includeUncontrolled: true })) {
+      page.postMessage({ type: "notice", urgent: Boolean(message.urgent) });
+    }
+  })());
 });
 
 // Tapping a notification: bring the open page forward and tell it what to show, or open a new one.
