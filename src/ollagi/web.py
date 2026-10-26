@@ -319,7 +319,9 @@ def create_app(config: Config, machine=None, sessions_api=sessions, run_watcher=
             "claude_sessions": [
                 {**asdict(s), "managed": _is_managed(machine, s.pid)} for s in claude_sessions
             ],
-            "projects": [asdict(p) for p in config.projects],
+            # The agent a new session in that folder would run: its own choice, else the default.
+            "projects": [{"name": p.name, "directory": p.directory, "agent": config.agent_for(p.directory).name}
+                         for p in config.projects],
         }
 
     def project_of(directory: str) -> str:

@@ -279,7 +279,7 @@ def test_system_reports_memory_processes_sessions_and_projects(fake_sessions):
     assert data["pressure"]["some_avg10"] == 0.5
     assert data["top_processes"][0]["name"] == "brave"
     assert data["claude_sessions"] == [{"pid": 200, "tree_rss": 380 * MIB, "processes": 1, "managed": True}]
-    assert data["projects"] == [{"name": "simedia", "directory": "/work/DATA!"}]
+    assert data["projects"] == [{"name": "simedia", "directory": "/work/DATA!", "agent": "claude"}]
     assert data["can_start"] >= 1
 
 

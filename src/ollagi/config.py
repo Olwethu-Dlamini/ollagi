@@ -5,10 +5,12 @@ Everything has a default, so ollagi works with no file at all. Example file:
     port = 8765
     allowed_login = "me@example.com"     # the Tailscale login allowed in through `tailscale serve`
     allowed_hosts = ["laptop.example-tailnet.ts.net"]
+    agent = "omp"                        # what a new session runs: "claude" (the default) or "omp"
 
     [[projects]]
     name = "simedia"
     directory = "/run/media/oll/Linux/SIMEDIA/DATA!"
+    agent = "claude"                     # optional: this project's sessions run a different agent
 
     [slack]
     drafts_to = "#my-notes"    # optional: queue events become DRAFTS here; nothing is sent without me
@@ -34,6 +36,7 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from ollagi import agents
 from ollagi.desktop import Settings as DesktopSettings
 from ollagi.watcher import ACTIONS, GIB, Settings as WatcherSettings
 
@@ -44,6 +47,7 @@ DEFAULT_PATH = Path.home() / ".config" / "ollagi" / "config.toml"
 class Project:
     name: str
     directory: str
+    agent: str | None = None  # None: the config's default agent
 
 
 @dataclass(frozen=True)
@@ -55,18 +59,31 @@ class Config:
     watcher: WatcherSettings = field(default_factory=WatcherSettings)
     slack_drafts_to: str | None = None
     desktop: DesktopSettings = field(default_factory=DesktopSettings)
+    agent: str = agents.DEFAULT
+
+    def agent_for(self, directory: str) -> agents.Agent:
+        """The agent a session in `directory` runs: the project's own choice, else the default."""
+        for project in self.projects:
+            if project.agent and Path(project.directory) == Path(directory):
+                return agents.get(project.agent)
+        return agents.get(self.agent)
 
 
 def parse(text: str) -> Config:
     data = tomllib.loads(text)
+    projects = tuple(Project(p["name"], p["directory"], p.get("agent")) for p in data.get("projects", ()))
+    # An unknown agent is refused when the file is read, not later when a session would start.
+    for name in [data.get("agent", agents.DEFAULT), *(p.agent for p in projects if p.agent)]:
+        agents.get(name)
     return Config(
         port=int(data.get("port", 8765)),
         allowed_login=data.get("allowed_login"),
         allowed_hosts=tuple(data.get("allowed_hosts", ())),
-        projects=tuple(Project(p["name"], p["directory"]) for p in data.get("projects", ())),
+        projects=projects,
         watcher=parse_watcher(data.get("watcher", {})),
         slack_drafts_to=data.get("slack", {}).get("drafts_to"),
         desktop=parse_desktop(data.get("desktop", {})),
+        agent=data.get("agent", agents.DEFAULT),
     )
 
 
