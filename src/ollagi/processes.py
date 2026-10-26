@@ -15,9 +15,13 @@ once, so the total is a slight overestimate. For deciding "is there room?", erri
 from dataclasses import dataclass
 from pathlib import Path
 
+from ollagi import agents
 from ollagi.system import KIB
 
-SESSION_NAME = "claude"
+# The process names that start a session's tree: `claude`, `omp` (docs/decisions/0035). omp's helpers
+# show other names ("omp daemon brok…", the kernel cuts names at 15 characters), so they never count
+# as a session of their own; they are counted in whichever tree they run under.
+SESSION_NAMES = agents.NAMES
 
 
 @dataclass(frozen=True)
@@ -31,7 +35,7 @@ class Proc:
 @dataclass(frozen=True)
 class Session:
     pid: int
-    tree_rss: int  # bytes, the claude process plus all its descendants
+    tree_rss: int  # bytes, the agent process plus all its descendants
     processes: int  # how many processes are in the tree
 
 
@@ -54,10 +58,10 @@ def parse_rss(status_text: str) -> int:
 
 
 def find_sessions(procs: list[Proc]) -> list[Session]:
-    """Group processes into Claude sessions.
+    """Group processes into agent sessions.
 
-    A session is a `claude` process whose parent is not itself a `claude` process (a claude
-    started by another claude belongs to the outer session).
+    A session is an agent process (`claude`, `omp`) whose parent is not itself an agent process: an
+    agent started by another agent (a claude run by omp, say) belongs to the outer session.
     """
     by_pid = {p.pid: p for p in procs}
     children: dict[int, list[Proc]] = {}
@@ -66,7 +70,7 @@ def find_sessions(procs: list[Proc]) -> list[Session]:
 
     def is_session_root(p: Proc) -> bool:
         parent = by_pid.get(p.ppid)
-        return p.name == SESSION_NAME and not (parent and parent.name == SESSION_NAME)
+        return p.name in SESSION_NAMES and not (parent and parent.name in SESSION_NAMES)
 
     sessions = []
     for root in (p for p in procs if is_session_root(p)):

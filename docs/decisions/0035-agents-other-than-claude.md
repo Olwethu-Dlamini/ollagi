@@ -25,6 +25,9 @@ Codex later, without a second copy of ollagi to maintain.
   is short. A running agent session is never handed back as the folder's scratch shell (0031).
 - Resume stays Claude-only until omp's conversations can be listed: a Claude conversation id passed to
   omp would resume nothing.
+- Memory: a session's process tree starts at any agent process (`claude`, `omp`), so the budget, the
+  system panel and the RAM watcher see omp's builds and tests. omp's helpers (`omp daemon brok…`) are
+  not sessions; an agent started by another agent belongs to the outer session.
 
 Watching an omp session's state follows in decision 0036.
 
@@ -38,4 +41,7 @@ Watching an omp session's state follows in decision 0036.
 
 2026-10-26: `tests/test_agents.py` (5 tests) and 4 page tests in `tests/test_web.py`. Each page test was
 run against the code with its rule removed (budget for Claude only; shell reuse keyed on "not claude")
-and failed; with the rule back, the whole suite: 266 passed, 3 skipped.
+and failed; with the rule back, the whole suite: 266 passed, 3 skipped. Memory: 3 tests in
+`tests/test_processes.py`, two of which fail with Claude-only matching; on this laptop `ollagi doctor`
+then listed the 3 running omp sessions (202, 766 and 122 MiB) that it did not see before, and answered
+"start another? no" (1.3 GiB left, 1.5 needed). Suite: 269 passed, 3 skipped.

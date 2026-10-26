@@ -1,4 +1,4 @@
-from ollagi.processes import Proc, find_sessions, parse_rss, parse_stat
+from ollagi.processes import Proc, Session, find_sessions, parse_rss, parse_stat
 from ollagi.system import MIB
 
 
@@ -46,3 +46,31 @@ def test_two_separate_sessions_are_counted_separately():
         Proc(pid=500, ppid=1, name="claude", rss=330 * MIB),
     ]
     assert [s.pid for s in find_sessions(procs)] == [200, 500]
+
+
+def test_an_omp_session_counts_its_whole_tree_like_a_claude_session():
+    # docs/decisions/0035: the RAM watcher and the budget must see omp's builds and tests too.
+    procs = [
+        Proc(pid=1, ppid=0, name="systemd", rss=10 * MIB),
+        Proc(pid=400, ppid=1, name="omp", rss=420 * MIB),
+        Proc(pid=410, ppid=400, name="bash", rss=4 * MIB),
+        Proc(pid=411, ppid=410, name="dotnet", rss=900 * MIB),
+    ]
+    assert find_sessions(procs) == [Session(pid=400, tree_rss=1324 * MIB, processes=3)]
+
+
+def test_omps_background_helpers_are_not_sessions_of_their_own():
+    # Seen on this laptop: `omp daemon brok` (a worker daemon; the kernel cuts names at 15 characters).
+    procs = [
+        Proc(pid=1, ppid=0, name="systemd", rss=10 * MIB),
+        Proc(pid=34778, ppid=1, name="omp daemon brok", rss=60 * MIB),
+    ]
+    assert find_sessions(procs) == []
+
+
+def test_a_claude_run_by_omp_belongs_to_the_omp_session():
+    procs = [
+        Proc(pid=400, ppid=1, name="omp", rss=420 * MIB),
+        Proc(pid=450, ppid=400, name="claude", rss=330 * MIB),
+    ]
+    assert find_sessions(procs) == [Session(pid=400, tree_rss=750 * MIB, processes=2)]
