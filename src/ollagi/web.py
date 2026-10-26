@@ -163,7 +163,7 @@ DRAFT_WORTHY = (" done", "waiting for you", "usage limit", "failed")
 
 
 def create_app(config: Config, machine=None, sessions_api=sessions, run_watcher=False, phone_url=None,
-               queue_store=None, run_queue=False, command_for=None, results_dir=None, jira_client=None,
+               queue_store=None, run_queue=False, results_dir=None, jira_client=None,
                outbox=None, outside_api=outside, desktop_api=None, open_terminal=None, summarise=None,
                notifier=None, run_notifier=False, omp_states=None) -> FastAPI:
     machine = machine or real_machine()
@@ -200,9 +200,8 @@ def create_app(config: Config, machine=None, sessions_api=sessions, run_watcher=
             drafts.add(config.slack_drafts_to, f"ollagi: {text}", source="queue")
         notifier.notify(notify.queue_notice(text))
 
-    runner = queueing.Runner(store, sessions_api, room=room_for_a_task,
-                             **({"command_for": command_for} if command_for else {}),
-                             **({"results_dir": results_dir} if results_dir else {}))
+    runner = queueing.Runner(store, sessions_api, room=room_for_a_task, agent_for=config.agent_for,
+                             omp_states=omp_states, **({"results_dir": results_dir} if results_dir else {}))
 
     def read_for_watcher():
         """What the watcher needs, read without asking tmux (a frozen session's tmux cannot answer)."""

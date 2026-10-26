@@ -1,14 +1,15 @@
 """The overnight queue: tasks that run one at a time while I am away (docs/decisions/0012).
 
 A task is a project folder plus a prompt. When its turn comes, it is started as an ordinary ollagi
-session running `claude "<prompt>"`, so it can be watched and answered from the phone like any other.
+session running the folder's agent with the prompt, `claude "<prompt>"` or `omp "<prompt>"`
+(docs/decisions/0035), so it can be watched and answered from the phone like any other.
 
 Life of a task:
 
-    queued -> running -> done            Claude finished its turn (final screen saved, session stopped)
-                      -> waiting         Claude is asking something; the queue holds until answered
+    queued -> running -> done            the agent finished its turn (final screen saved, session stopped)
+                      -> waiting         the agent is asking something; the queue holds until answered
                       -> limited         the screen says a usage limit was hit; the queue pauses
-                      -> failed          the session ended, or Claude never started working
+                      -> failed          the session ended, or the agent never started working
     queued -> cancelled
 
 Tasks live in a small SQLite database (sqlite3 is in Python's standard library): one file, no
@@ -19,11 +20,11 @@ import re
 import sqlite3
 import threading
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from ollagi import claude_screen
+from ollagi import agents, claude_screen, omp_state
 
 DEFAULT_PATH = Path.home() / ".local" / "share" / "ollagi" / "queue.db"
 RESULTS_DIR = Path.home() / ".local" / "share" / "ollagi" / "results"
@@ -163,17 +164,19 @@ class Runner:
     """Decides, every few seconds, what the queue should do next. One task at a time.
 
     Everything outside the database is passed in, so tests can drive it with fakes:
-      sessions_api  start, names, screen, scope_state, stop (normally ollagi.sessions)
+      sessions_api  start, names, info, screen, scope_state, stop (normally ollagi.sessions)
       room          returns True when the budget rule and the RAM watcher allow a new session
-      command_for   turns a prompt into the program to run (normally ["claude", prompt])
+      agent_for     the agent a task's folder runs (normally the config's choice, docs/decisions/0035)
+      omp_states    an omp session's state from its hook's file (docs/decisions/0036)
     """
 
     store: Store
     sessions_api: object
     room: Callable[[], bool]
-    command_for: Callable[[str], Sequence[str]] = lambda prompt: ["claude", prompt]
+    agent_for: Callable[[str], agents.Agent] = lambda directory: agents.get(agents.DEFAULT)
+    omp_states: Callable[[str], claude_screen.Reading] = omp_state.read
     results_dir: Path = RESULTS_DIR
-    give_up_after: float = 300.0  # a task whose Claude never starts working in 5 minutes has failed
+    give_up_after: float = 300.0  # a task whose agent never starts working in 5 minutes has failed
 
     def step(self, now: float) -> str:
         """Do at most one thing; return what was done, in words (for the event log)."""
@@ -190,7 +193,7 @@ class Runner:
     def begin(self, task: Task, now: float) -> str:
         name = f"q{task.id}"
         try:
-            self.sessions_api.start(name, task.directory, list(self.command_for(task.prompt)))
+            self.sessions_api.start(name, task.directory, self.agent_for(task.directory).with_prompt(task.prompt))
         except (ValueError, RuntimeError) as error:
             self.store.update(task.id, status="failed", note=str(error), finished=now)
             return f"task {task.id} could not start: {error}"
@@ -211,7 +214,8 @@ class Runner:
             self.store.set_paused(True, f"usage limit reached during task {task.id}")
             return f"task {task.id} hit a usage limit; queue paused"
 
-        reading = claude_screen.read(text)
+        # Claude's state is read from its screen; omp reports its own through a hook.
+        reading = self.omp_states(name) if self.sessions_api.info(name).program == "omp" else claude_screen.read(text)
         if reading.state == "working":
             if task.status != "running" or not task.seen_working:
                 self.store.update(task.id, status="running", seen_working=1)
@@ -232,8 +236,8 @@ class Runner:
         started = task.started if task.started is not None else now
         if not task.seen_working and now - started > self.give_up_after:
             self.sessions_api.stop(name)
-            self.store.update(task.id, status="failed", note="Claude never started working", finished=now)
-            return f"task {task.id} failed: Claude never started working"
+            self.store.update(task.id, status="failed", note="the agent never started working", finished=now)
+            return f"task {task.id} failed: the agent never started working"
         return ""
 
     def save_result(self, task: Task, name: str) -> None:
