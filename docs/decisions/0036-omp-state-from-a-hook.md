@@ -19,11 +19,11 @@ small TypeScript files it runs on events (a turn starting, a tool being called, 
 - It acts only in sessions ollagi started: `sessions.start_command` sets `OLLAGI_SESSION=<name>` on the
   tmux session, and the hook does nothing without a valid name. Subagents are ignored.
 - `src/ollagi/omp_state.py` reads the file into the same `Reading` that `claude_screen.read` returns, so
+  the page and the notifier do not care which agent runs. No file, a damaged file or an unknown state
+  reads as `unknown`, never as a guess.
 - The overnight queue (0012) starts each task with its folder's agent (`omp "<prompt>"` in an omp
   folder) and follows an omp task through the same hook file: working, waiting with the question,
   done.
-  the page and the notifier do not care which agent runs. No file, a damaged file or an unknown state
-  reads as `unknown`, never as a guess.
 - The notification's Allow and Deny buttons (0029) stay Claude-only: which key picks which choice in
   omp's question is not checked yet, and a wrong key would answer for me. An omp question is answered in
   its own screen in ollagi.
