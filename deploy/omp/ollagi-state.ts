@@ -3,7 +3,10 @@
 // ollagi reads a Claude session's state from its screen. omp has hooks instead, so this file writes the
 // state to a small JSON file that ollagi reads:
 //
-//   $XDG_RUNTIME_DIR/ollagi/<session>.json   {"state", "question", "options", "updated", "pid"}
+//   $XDG_RUNTIME_DIR/ollagi/<session>.json   {"state", "question", "options", "conversation", "updated", "pid"}
+//
+// "conversation" is the id of the omp conversation the session has open, so ollagi never offers it for a
+// second resume while it runs (two omp processes writing one file would corrupt it; decision 0037).
 //
 // The states are ollagi's own (src/ollagi/claude_screen.py):
 //   idle       the session opened, nothing has happened yet
@@ -25,8 +28,10 @@ const TRACE = process.env.OLLAGI_STATE_TRACE; // optional: append every change t
 
 type State = "idle" | "working" | "needs_you" | "done";
 
+let conversation: string | null = null; // set at session_start from the session file's name: <time>_<id>.jsonl
+
 function write(state: State, question: string | null = null, options: string[] = []): void {
-	const record = { state, question, options, updated: Date.now() / 1000, pid: process.pid };
+	const record = { state, question, options, conversation, updated: Date.now() / 1000, pid: process.pid };
 	const text = JSON.stringify(record);
 	try {
 		mkdirSync(DIR, { recursive: true, mode: 0o700 });
@@ -57,6 +62,7 @@ function askOf(input: unknown): { question: string | null; options: string[] } {
 
 interface Ctx {
 	agent?: { kind?: string };
+	sessionManager?: { getSessionFile?(): string | undefined };
 }
 interface ToolEvent {
 	toolName: string;
@@ -72,7 +78,12 @@ const isSub = (ctx: Ctx) => ctx?.agent?.kind === "sub";
 
 export default function (pi: HookApi): void {
 	if (!NAME_OK.test(SESSION)) return; // not an ollagi session, or a name that could escape the folder
-	pi.on("session_start", (_e, ctx) => { if (!isSub(ctx)) write("idle"); });
+	pi.on("session_start", (_e, ctx) => {
+		if (isSub(ctx)) return;
+		const file = ctx.sessionManager?.getSessionFile?.() ?? "";
+		conversation = /_([0-9a-f-]{8,})\.jsonl$/.exec(file)?.[1] ?? null;
+		write("idle");
+	});
 	pi.on("agent_start", (_e, ctx) => { if (!isSub(ctx)) write("working"); });
 	pi.on("agent_end", (_e, ctx) => { if (!isSub(ctx)) write("done"); });
 	pi.on("tool_call", (event, ctx) => {

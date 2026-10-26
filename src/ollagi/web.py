@@ -58,8 +58,8 @@ from pydantic import BaseModel
 
 from collections import deque
 
-from ollagi import (access, agents, claude_screen, desktop, grouping, notify, omp_state, outside, queue as queueing,
-                    sessions, slack_outbox, summary, system, terminal, watcher as watching, webpush)
+from ollagi import (access, agents, claude_screen, desktop, grouping, notify, omp_conversations, omp_state, outside,
+                    queue as queueing, sessions, slack_outbox, summary, system, terminal, watcher as watching, webpush)
 from ollagi.budget import Limits, how_many_can_start
 from ollagi.config import Config
 from ollagi.processes import find_sessions, read_processes
@@ -165,11 +165,15 @@ DRAFT_WORTHY = (" done", "waiting for you", "usage limit", "failed")
 def create_app(config: Config, machine=None, sessions_api=sessions, run_watcher=False, phone_url=None,
                queue_store=None, run_queue=False, results_dir=None, jira_client=None,
                outbox=None, outside_api=outside, desktop_api=None, open_terminal=None, summarise=None,
-               notifier=None, run_notifier=False, omp_states=None) -> FastAPI:
+               notifier=None, run_notifier=False, omp_states=None, omp_conversation_list=None,
+               omp_open=None) -> FastAPI:
     machine = machine or real_machine()
     # An omp session's state comes from the file its hook writes (docs/decisions/0036); tests pass
     # a function over a temporary folder.
     omp_states = omp_states or omp_state.read
+    # Resume for omp (docs/decisions/0037): its conversation files, and the ones running sessions hold.
+    omp_conversation_list = omp_conversation_list or omp_conversations.recent
+    omp_open = omp_open or omp_state.open_conversations
     # Windows on this laptop for a session (docs/decisions/0017). Only the page's Start and the
     # open/close button use them; the overnight queue never opens one.
     laptop = desktop_api or desktop.Laptop(config.desktop)
@@ -396,8 +400,13 @@ def create_app(config: Config, machine=None, sessions_api=sessions, run_watcher=
             "windows": laptop.count(name),
         }
 
-    def resumable(directory: str):
-        """A folder's recent conversations that are not open in a window right now."""
+    def resumable(directory: str, program: str):
+        """A folder's recent conversations for that agent, without any a running session has open."""
+        if program == "omp":
+            # docs/decisions/0037: omp's own files, minus conversations open in a running omp session.
+            return omp_conversation_list(directory, leave_out=omp_open())
+        if program != "claude":
+            return []
         running = {s.session_id for s in outside_api.list_sessions()}
         return [c for c in outside_api.recent_conversations(directory) if c.session_id not in running]
 
@@ -407,8 +416,9 @@ def create_app(config: Config, machine=None, sessions_api=sessions, run_watcher=
             raise HTTPException(400, f"program must be \"agent\", \"shell\" or one of: {', '.join(sorted(agents.NAMES))}")
         program = config.agent_for(body.directory).name if body.program == "agent" else body.program
         # Checked before the budget, so a bad request is refused as bad even when memory is short.
-        if body.resume and (program != "claude" or body.resume not in {c.session_id for c in resumable(body.directory)}):
-            # Only an id the folder's own list offers: never an arbitrary word on claude's command line.
+        if body.resume and body.resume not in {c.session_id for c in resumable(body.directory, program)}:
+            # Only an id the folder's own list offers for that agent: never an arbitrary word on the
+            # agent's command line, and never a Claude id handed to omp or the other way round.
             raise HTTPException(400, "resume must name one of the folder's recent conversations")
         # A shell is a few MiB and is not an agent session, so the budget (made for an agent's 1.5 GiB)
         # does not apply to it.
@@ -613,8 +623,10 @@ def create_app(config: Config, machine=None, sessions_api=sessions, run_watcher=
 
     @app.get("/api/conversations")
     def conversations(directory: str):
+        """The folder's recent conversations for the agent a new session there would run."""
         now = time.time()
-        return {"conversations": [{**asdict(c), "age_seconds": int(now - c.updated)} for c in resumable(directory)]}
+        found = resumable(directory, config.agent_for(directory).name)
+        return {"conversations": [{**asdict(c), "age_seconds": int(now - c.updated)} for c in found]}
 
     @app.get("/api/outside")
     def list_outside():

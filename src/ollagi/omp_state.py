@@ -41,3 +41,17 @@ def read(name: str, folder: Path | None = None) -> Reading:
     labels = [label for label in data.get("options") or [] if isinstance(label, str)]
     question = data.get("question") if isinstance(data.get("question"), str) else None
     return Reading(state, question=question, options=[Option(i, label) for i, label in enumerate(labels, start=1)])
+
+
+def open_conversations(folder: Path | None = None) -> frozenset[str]:
+    """Conversation ids that running omp sessions have open, from their state files (the hook writes
+    the id it was started or resumed with). A resume list must leave these out (docs/decisions/0037)."""
+    found = set()
+    for path in (folder or runtime_dir()).glob("*.json"):
+        try:
+            conversation = json.loads(path.read_text()).get("conversation")
+        except (OSError, ValueError):
+            continue
+        if isinstance(conversation, str) and conversation:
+            found.add(conversation)
+    return frozenset(found)

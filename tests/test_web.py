@@ -9,6 +9,7 @@ from ollagi.budget import GIB
 from ollagi.claude_screen import Option, Reading
 from ollagi.config import Config, Project
 from ollagi.desktop import Settings
+from ollagi.outside import Conversation
 from ollagi.processes import Proc
 from ollagi.queue import Store
 from ollagi.sessions import SessionInfo
@@ -211,7 +212,7 @@ class CatTerminals:
 
 
 def client(fake_sessions, available_gib=8.0, jira=None, outbox=None, outside_api=None, windows=None, terminals=None,
-           summariser=None, notifier=None, omp_states=None, **config):
+           summariser=None, notifier=None, omp_states=None, omp_conversations=(), omp_open=frozenset(), **config):
     from ollagi.web import create_app
 
     cfg = Config(projects=(Project("simedia", "/work/DATA!"),), **config)
@@ -221,7 +222,11 @@ def client(fake_sessions, available_gib=8.0, jira=None, outbox=None, outside_api
                      desktop_api=windows if windows is not None else FakeWindows(),
                      open_terminal=terminals if terminals is not None else CatTerminals(),
                      summarise=summariser or FakeSummariser(),
-                     omp_states=omp_states or (lambda name: Reading("unknown")))
+                     omp_states=omp_states or (lambda name: Reading("unknown")),
+                     # Never the real ~/.omp: the folder's omp conversations are given per test.
+                     omp_conversation_list=lambda directory, leave_out=frozenset(): [
+                         c for c in omp_conversations if c.session_id not in leave_out],
+                     omp_open=lambda: omp_open)
     return TestClient(app, base_url="http://127.0.0.1:8765")
 
 
@@ -386,11 +391,28 @@ def test_an_omp_session_needs_room_like_a_claude_session(fake_sessions):
     assert "o-1" not in fake_sessions.running
 
 
-def test_resume_is_refused_for_omp_until_its_conversations_can_be_listed(fake_sessions):
-    # The resume list holds Claude's conversation ids; passing one to omp would resume nothing.
-    c = client(fake_sessions, agent="omp")
-    refused = c.post("/api/sessions", json={"directory": "/work/DATA!/api", "resume": "conv-2"}, headers=CHANGE)
-    assert refused.status_code == 400
+def test_an_omp_folder_offers_omp_conversations_and_resumes_one_with_omp(fake_sessions):
+    # docs/decisions/0037: the resume list follows the folder's agent.
+    conversations = (Conversation("01a1-aaaa", "SD-7119 close-out", 2000.0), Conversation("01a1-bbbb", "SD-7120", 1000.0))
+    c = client(fake_sessions, agent="omp", omp_conversations=conversations)
+    offered = [x["session_id"] for x in c.get("/api/conversations", params={"directory": "/w"}).json()["conversations"]]
+    assert offered == ["01a1-aaaa", "01a1-bbbb"]
+    started = c.post("/api/sessions", json={"name": "o-1", "directory": "/w", "resume": "01a1-aaaa"}, headers=CHANGE)
+    assert started.status_code == 200
+    assert fake_sessions.commands["o-1"] == ["omp", "--resume", "01a1-aaaa"]
+
+
+def test_a_conversation_is_never_handed_to_the_other_agent_or_resumed_twice(fake_sessions):
+    conversations = (Conversation("01a1-aaaa", "SD-7119", 2000.0),)
+    c = client(fake_sessions, agent="omp", omp_conversations=conversations, omp_open=frozenset({"01a1-aaaa"}))
+    # Open in a running omp session: two omp processes writing one file would corrupt it.
+    assert c.get("/api/conversations", params={"directory": "/w"}).json()["conversations"] == []
+    assert c.post("/api/sessions", json={"directory": "/w", "resume": "01a1-aaaa"}, headers=CHANGE).status_code == 400
+    # A Claude conversation id passed to omp would resume nothing.
+    assert c.post("/api/sessions", json={"directory": "/work/DATA!/api", "resume": "conv-2"}, headers=CHANGE).status_code == 400
+    # And an omp id is not a Claude conversation.
+    free = client(fake_sessions, omp_conversations=(Conversation("01a1-cccc", "x", 1.0),))
+    assert free.post("/api/sessions", json={"directory": "/w", "resume": "01a1-cccc"}, headers=CHANGE).status_code == 400
 
 
 def test_a_running_omp_session_is_not_handed_back_as_the_folders_scratch_shell(fake_sessions, monkeypatch):

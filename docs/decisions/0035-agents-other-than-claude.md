@@ -23,8 +23,7 @@ Codex later, without a second copy of ollagi to maintain.
   `ollagi start` and `ollagi here` use the same rule. An agent can still be named outright (`"omp"`,
   `"claude"`). The memory budget applies to every agent; only a plain shell is let through when memory
   is short. A running agent session is never handed back as the folder's scratch shell (0031).
-- Resume stays Claude-only until omp's conversations can be listed: a Claude conversation id passed to
-  omp would resume nothing.
+- Resume follows the agent too (0037).
 - Memory: a session's process tree starts at any agent process (`claude`, `omp`), so the budget, the
   system panel and the RAM watcher see omp's builds and tests. omp's helpers (`omp daemon brok…`) are
   not sessions; an agent started by another agent belongs to the outer session.
