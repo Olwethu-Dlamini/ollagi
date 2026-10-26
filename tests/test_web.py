@@ -877,6 +877,19 @@ def test_a_shell_session_never_notifies(fake_sessions):
     assert "sh-1" not in c.app.state.read_states()
 
 
+def test_an_open_omp_session_shows_its_hook_state_and_choices_not_a_screen_guess(fake_sessions):
+    # Found live on 2026-10-26: the session list said needs_you, but the session's own screen endpoint
+    # (what the phone opens, and where the choice buttons come from) still read Claude's screen: unknown.
+    fake_sessions.start("o-1", "/w", ["omp"])
+    fake_sessions.screens["o-1"] = "| Does the phone see this question? |\n| > ( ) Yes |\n|   ( ) No |"
+    asked = Reading("needs_you", question="Does the phone see this question?", options=[Option(1, "Yes"), Option(2, "No")])
+    c = client(fake_sessions, omp_states=lambda name: asked)
+    shown = c.get("/api/sessions/o-1/screen").json()
+    assert shown["state"] == "needs_you"
+    assert shown["question"] == "Does the phone see this question?"
+    assert shown["options"] == [{"number": 1, "label": "Yes"}, {"number": 2, "label": "No"}]
+
+
 def test_an_omp_session_shows_the_state_its_hook_reported_not_a_screen_guess(fake_sessions):
     # docs/decisions/0036: omp's state comes from its hook's file, whatever its screen looks like.
     fake_sessions.start("o-1", "/w", ["omp"])

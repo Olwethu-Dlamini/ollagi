@@ -393,7 +393,15 @@ def create_app(config: Config, machine=None, sessions_api=sessions, run_watcher=
             return {"name": name, "frozen": True, "text": None, "state": "frozen", "question": None, "options": [],
                     "windows": None}
         text = sessions_api.screen(name, lines=min(max(lines, 10), 2000), colours=True)
-        reading = claude_screen.read(text)
+        info = sessions_api.info(name)
+        # Claude's state is read from this screen; omp's from its hook (docs/decisions/0036). Agents only:
+        # a shell's screen could look like a Claude menu.
+        if info.program == "omp":
+            reading = omp_states(name)
+        elif info.program in agents.NAMES:
+            reading = claude_screen.read(text)
+        else:
+            reading = claude_screen.Reading("unknown")
         return {
             "name": name, "frozen": False, "text": text, "state": reading.state,
             "question": reading.question, "options": [asdict(o) for o in reading.options],

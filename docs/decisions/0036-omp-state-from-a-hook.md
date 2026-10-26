@@ -28,6 +28,9 @@ small TypeScript files it runs on events (a turn starting, a tool being called, 
   omp's question is not checked yet, and a wrong key would answer for me. An omp question is answered in
   its own screen in ollagi.
 
+- The session's own screen endpoint (what the phone opens, where choice buttons come from) uses the same
+  reading. Found live: the list said needs_you while that endpoint still read Claude's screen (unknown).
+
 ## Consequences
 
 - The state of an omp session is what omp itself says, not a reading of its screen.
@@ -47,3 +50,8 @@ small TypeScript files it runs on events (a turn starting, a tool being called, 
   Claude screen reader then reported the screen's question instead of omp's; without the guard a key
   was typed into the omp session). Queue: a test runs an omp task from start to done through the hook's
   states; with the Claude screen reader instead it never counts as working. Suite: 276 passed, 3 skipped.
+- Live through ollagi on archnox (tmux 3.8), 2026-10-26 20:10: a session started from the page ran omp
+  with OLLAGI_SESSION=smoke-omp; the page showed idle, then needs_you "Does the phone see this question?"
+  with Yes / No on both the list and the session endpoint, then done after Enter. omp's dialog keys, for
+  enabling the notification buttons later: Up/Down move, Enter selects, Esc cancels, and an extra
+  "Other (type your own)" choice follows the offered ones.
