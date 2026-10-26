@@ -8,7 +8,7 @@
 # systemd scope (docs/decisions/0005), outside this service's group.
 
 [Unit]
-Description=ollagi web page for Claude Code sessions
+Description=ollagi web page for coding-agent sessions (Claude Code, omp)
 After=network-online.target
 
 [Service]
@@ -17,9 +17,9 @@ After=network-online.target
 ExecStart=/run/media/oll/Linux/Projects/ollagi/.venv/bin/ollagi serve
 Restart=on-failure
 RestartSec=10s
-# A service does not get my shell's PATH; the tools ollagi runs (claude, tmux, tailscale,
-# systemd-run) all live in /usr/bin.
-Environment=PATH=/usr/local/bin:/usr/bin
+# A service does not get my shell's PATH. claude, tmux, tailscale and systemd-run live in /usr/bin;
+# omp (decision 0035) and uv install into ~/.local/bin (%h is my home folder).
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin
 # Print immediately instead of buffering, so `journalctl --user -u ollagi` shows the startup lines.
 Environment=PYTHONUNBUFFERED=1
 

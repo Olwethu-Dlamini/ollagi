@@ -1,13 +1,13 @@
 # ollagi
 
-A small, self-hosted control room for running Claude Code on my own machine:
+A small, self-hosted control room for running coding agents (Claude Code, omp) on my own machine:
 
-- start Claude Code sessions per project and keep them alive in tmux,
+- start agent sessions per project and keep them alive in tmux,
 - follow and answer them from my phone over Tailscale (open a QR code, no app store app),
 - queue tasks to run one after another while I am away,
 - group similar tickets so they are solved together in one session,
 - never start more work than the machine's RAM can take,
-- show and manage the rest of the system too (memory, CPU, disks, heavy processes), with Claude Code as the main focus.
+- show and manage the rest of the system too (memory, CPU, disks, heavy processes), with the agents as the main focus.
 
 It is built for my SiMedia work first, but nothing in it is tied to SiMedia: projects come from a config file.
 
@@ -44,6 +44,10 @@ Early. Built in small steps, one idea per commit, so every part can be read and 
 | 9i | Allow and Deny on the notification itself, pressed only if the question is still on screen | done |
 | 9j | Sessions named after their folder when no name is typed; one scratch shell per folder | done |
 | 9k | Text size for the screen; resume an earlier conversation from the New sheet | done |
+| 10 | Agents other than Claude: the config chooses (`agent = "omp"`, or per project), page and terminal start it | done |
+| 10a | omp sessions count for the memory budget and the RAM watcher | done |
+| 10b | omp's state from a hook (idle, working, needs you with the question, done); the queue follows it | done |
+| 10c | Resume an earlier omp conversation from the New sheet | done |
 
 ## Try it
 
@@ -53,6 +57,15 @@ uv run ollagi doctor  # is there room for another Claude session?
 uv run pytest         # run the tests
 uv run ollagi serve   # the web page on http://127.0.0.1:8765 (or run it as a service, below)
 uv run ollagi qr      # the phone address as a QR code
+```
+
+To run omp instead of Claude (decisions 0035 to 0037): put `agent = "omp"` in
+`~/.config/ollagi/config.toml` (or `agent = "omp"` under one `[[projects]]` entry), and link omp's state
+hook once, so ollagi can tell when an omp session needs you:
+
+```bash
+mkdir -p ~/.omp/agent/hooks/post
+ln -sfn "$PWD/deploy/omp/ollagi-state.ts" ~/.omp/agent/hooks/post/ollagi-state.ts   # inert outside ollagi
 ```
 
 Phone access, once (decision 0007):
