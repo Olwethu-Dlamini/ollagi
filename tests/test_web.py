@@ -893,6 +893,20 @@ def test_an_open_omp_session_shows_its_hook_state_and_choices_not_a_screen_guess
     assert shown["options"] == [{"number": 1, "label": "Yes"}, {"number": 2, "label": "No"}]
 
 
+def test_with_the_live_terminal_open_the_page_gets_the_state_and_question_without_the_screen(fake_sessions):
+    # The live terminal draws the screen itself; the page's poll only needs the dot and a question's
+    # buttons. Sending the 300-line copy anyway cost about 46 KB every 4 s on the phone.
+    fake_sessions.start("c-1", "/w", ["claude"])
+    fake_sessions.screens["c-1"] = "\n".join(["Do you want to make this edit?", "❯ 1. Yes", "  2. No"])
+    c = client(fake_sessions)
+    light = c.get("/api/sessions/c-1/screen?lines=300&text=0").json()
+    assert light["text"] is None
+    assert light["state"] == "needs_you"
+    assert light["question"] == "Do you want to make this edit?"
+    assert [o["label"] for o in light["options"]] == ["Yes", "No"]
+    assert "Do you want" in c.get("/api/sessions/c-1/screen?lines=300").json()["text"]  # the copy still has it
+
+
 def test_an_omp_session_shows_the_state_its_hook_reported_not_a_screen_guess(fake_sessions):
     # docs/decisions/0036: omp's state comes from its hook's file, whatever its screen looks like.
     fake_sessions.start("o-1", "/w", ["omp"])

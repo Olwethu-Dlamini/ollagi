@@ -314,8 +314,9 @@ async function refreshViewer() {
     return item;
   }));
 
+  // With the live terminal open it draws the screen itself: ask only for the state and a question.
   let data;
-  try { data = await api(`/api/sessions/${current}/screen?lines=300`); }
+  try { data = await api(`/api/sessions/${current}/screen?lines=300${live ? "&text=0" : ""}`); }
   catch (error) { if (!live) $("screen").textContent = error.message; return; }
 
   $("v-dot").className = `dot ${data.state}`;

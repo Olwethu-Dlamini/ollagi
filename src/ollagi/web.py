@@ -385,25 +385,27 @@ def create_app(config: Config, machine=None, sessions_api=sessions, run_watcher=
         return found
 
     @app.get("/api/sessions/{name}/screen")
-    def screen(name: str, lines: int = 200):
+    def screen(name: str, lines: int = 200, text: bool = True):
+        # text=0: the state and a question only, for a page whose live terminal draws the screen itself.
         _require_session(sessions_api, name)
         if sessions_api.scope_state(name)[0]:
             # Not an error: the session is fine, its tmux is just paused and cannot draw the screen.
             # Its windows are not counted either: a paused tmux would not answer.
             return {"name": name, "frozen": True, "text": None, "state": "frozen", "question": None, "options": [],
                     "windows": None}
-        text = sessions_api.screen(name, lines=min(max(lines, 10), 2000), colours=True)
         info = sessions_api.info(name)
+        reads_screen = info.program in agents.NAMES and info.program != "omp"
+        captured = sessions_api.screen(name, lines=min(max(lines, 10), 2000), colours=True) if text or reads_screen else None
         # Claude's state is read from this screen; omp's from its hook (docs/decisions/0036). Agents only:
         # a shell's screen could look like a Claude menu.
         if info.program == "omp":
             reading = omp_states(name)
         elif info.program in agents.NAMES:
-            reading = claude_screen.read(text)
+            reading = claude_screen.read(captured)
         else:
             reading = claude_screen.Reading("unknown")
         return {
-            "name": name, "frozen": False, "text": text, "state": reading.state,
+            "name": name, "frozen": False, "text": captured if text else None, "state": reading.state,
             "question": reading.question, "options": [asdict(o) for o in reading.options],
             "windows": laptop.count(name),
         }
