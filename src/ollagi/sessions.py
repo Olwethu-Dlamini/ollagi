@@ -91,14 +91,18 @@ def tmux(name: str, *args: str) -> list[str]:
 
 
 def start_command(name: str, directory: str, command: Sequence[str]) -> list[str]:
-    """The full command line that starts a session (built separately so tests can read it)."""
+    """The full command line that starts a session (built separately so tests can read it).
+
+    OLLAGI_SESSION=<name> is set in the session's environment, so a program in it can say which
+    session it is: omp's state hook names its state file after it (docs/decisions/0036)."""
     return [
         "systemd-run", "--user", "--scope", "--quiet",
         f"--unit={scope_unit(name).removesuffix('.scope')}",
         f"--slice={slice_unit(name)}",
         f"--description=ollagi session {name}",
         "tmux", "-f", str(TMUX_CONF), "-L", socket_name(name),
-        "new-session", "-d", "-s", WINDOW, "-x", "200", "-y", "50", "-c", directory, "--", *command,
+        "new-session", "-d", "-e", f"OLLAGI_SESSION={name}", "-s", WINDOW, "-x", "200", "-y", "50",
+        "-c", directory, "--", *command,
     ]
 
 

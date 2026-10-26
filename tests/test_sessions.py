@@ -38,6 +38,9 @@ def test_start_runs_tmux_in_a_scope_inside_the_sessions_own_slice():
     assert tmux_part[3:5] == ["-L", "ollagi-sd-6641"]
     assert tmux_part[-2:] == ["--", "claude"]
     assert ["-c", "/work/repo"] == tmux_part[tmux_part.index("-c"):tmux_part.index("-c") + 2]
+    # The session's name travels in its environment, so omp's state hook can name its file (0036).
+    assert tmux_part[tmux_part.index("-e"):tmux_part.index("-e") + 2] == ["-e", "OLLAGI_SESSION=sd-6641"]
+    assert tmux_part.index("-e") < tmux_part.index("--")
 
 
 def test_dashes_are_escaped_so_one_sessions_slice_never_nests_inside_another():

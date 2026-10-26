@@ -58,8 +58,8 @@ from pydantic import BaseModel
 
 from collections import deque
 
-from ollagi import (access, agents, claude_screen, desktop, grouping, notify, outside, queue as queueing, sessions, slack_outbox,
-                    summary, system, terminal, watcher as watching, webpush)
+from ollagi import (access, agents, claude_screen, desktop, grouping, notify, omp_state, outside, queue as queueing,
+                    sessions, slack_outbox, summary, system, terminal, watcher as watching, webpush)
 from ollagi.budget import Limits, how_many_can_start
 from ollagi.config import Config
 from ollagi.processes import find_sessions, read_processes
@@ -165,8 +165,11 @@ DRAFT_WORTHY = (" done", "waiting for you", "usage limit", "failed")
 def create_app(config: Config, machine=None, sessions_api=sessions, run_watcher=False, phone_url=None,
                queue_store=None, run_queue=False, command_for=None, results_dir=None, jira_client=None,
                outbox=None, outside_api=outside, desktop_api=None, open_terminal=None, summarise=None,
-               notifier=None, run_notifier=False) -> FastAPI:
+               notifier=None, run_notifier=False, omp_states=None) -> FastAPI:
     machine = machine or real_machine()
+    # An omp session's state comes from the file its hook writes (docs/decisions/0036); tests pass
+    # a function over a temporary folder.
+    omp_states = omp_states or omp_state.read
     # Windows on this laptop for a session (docs/decisions/0017). Only the page's Start and the
     # open/close button use them; the overnight queue never opens one.
     laptop = desktop_api or desktop.Laptop(config.desktop)
@@ -340,6 +343,9 @@ def create_app(config: Config, machine=None, sessions_api=sessions, run_watcher=
             return claude_screen.Reading("frozen")
         if not info.alive:
             return claude_screen.Reading("exited")
+        if info.program == "omp":
+            # omp reports its state through a hook (docs/decisions/0036), not on its screen.
+            return omp_states(name)
         return claude_screen.read(sessions_api.screen(name, lines=80))
 
     def read_states() -> dict[str, tuple[str, str | None]]:
@@ -349,9 +355,9 @@ def create_app(config: Config, machine=None, sessions_api=sessions, run_watcher=
         found = {}
         for name in sessions_api.names():
             info = sessions_api.info(name)
-            # omp tells its state through a hook, not its screen (docs/decisions/0036); until that is
-            # read, only Claude sessions are watched. Shells never are.
-            if info.program != "claude":
+            # Agents only: a shell never needs me, and a program in it could draw something that
+            # looks like a Claude menu.
+            if info.program not in agents.NAMES:
                 continue
             reading = state_of(name, info)
             found[name] = (reading.state, reading.question, tuple(reading.options))
@@ -490,6 +496,10 @@ def create_app(config: Config, machine=None, sessions_api=sessions, run_watcher=
         otherwise nothing is typed and the answer is 409."""
         _require_session(sessions_api, name)
         _refuse_if_frozen(sessions_api, name)
+        if sessions_api.info(name).program != "claude":
+            # Which key picks which choice in omp's question has not been checked yet; a wrong key
+            # would answer for me. Until then omp is answered in its own screen (docs/decisions/0036).
+            raise HTTPException(409, f"{name} runs omp: answer it in its screen in ollagi")
         reading = claude_screen.read(sessions_api.screen(name, lines=80))
         if reading.state != "needs_you" or reading.question != body.question:
             raise HTTPException(409, f"{name} is no longer asking that; open ollagi to see its screen")

@@ -6,6 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from ollagi.budget import GIB
+from ollagi.claude_screen import Option, Reading
 from ollagi.config import Config, Project
 from ollagi.desktop import Settings
 from ollagi.processes import Proc
@@ -210,7 +211,7 @@ class CatTerminals:
 
 
 def client(fake_sessions, available_gib=8.0, jira=None, outbox=None, outside_api=None, windows=None, terminals=None,
-           summariser=None, notifier=None, **config):
+           summariser=None, notifier=None, omp_states=None, **config):
     from ollagi.web import create_app
 
     cfg = Config(projects=(Project("simedia", "/work/DATA!"),), **config)
@@ -219,7 +220,8 @@ def client(fake_sessions, available_gib=8.0, jira=None, outbox=None, outside_api
                      jira_client=jira or FakeJira(), outbox=outbox or temp_outbox(), outside_api=outside_api or FakeOutside(),
                      desktop_api=windows if windows is not None else FakeWindows(),
                      open_terminal=terminals if terminals is not None else CatTerminals(),
-                     summarise=summariser or FakeSummariser())
+                     summarise=summariser or FakeSummariser(),
+                     omp_states=omp_states or (lambda name: Reading("unknown")))
     return TestClient(app, base_url="http://127.0.0.1:8765")
 
 
@@ -851,3 +853,24 @@ def test_a_shell_session_never_notifies(fake_sessions):
     fake_sessions.screens["sh-1"] = "\n".join(["Do you want to make this edit?", "❯ 1. Yes", "  2. No"])
     c = client(fake_sessions)
     assert "sh-1" not in c.app.state.read_states()
+
+
+def test_an_omp_session_shows_the_state_its_hook_reported_not_a_screen_guess(fake_sessions):
+    # docs/decisions/0036: omp's state comes from its hook's file, whatever its screen looks like.
+    fake_sessions.start("o-1", "/w", ["omp"])
+    fake_sessions.screens["o-1"] = "\n".join(["Do you want to make this edit?", "❯ 1. Yes", "  2. No"])
+    asked = Reading("needs_you", question="Approve the plan?", options=[Option(1, "Approve"), Option(2, "Change it")])
+    c = client(fake_sessions, omp_states=lambda name: asked if name == "o-1" else Reading("unknown"))
+    listed = next(s for s in c.get("/api/sessions").json() if s["name"] == "o-1")
+    assert listed["state"] == "needs_you" and listed["question"] == "Approve the plan?"
+    assert c.app.state.read_states()["o-1"][1] == "Approve the plan?"  # the notifier hears it too
+
+
+def test_a_notification_button_never_types_into_an_omp_session(fake_sessions):
+    # Which key picks which choice in omp's question is not verified yet: refuse rather than guess,
+    # even when the screen happens to look like a Claude menu.
+    fake_sessions.start("o-1", "/w", ["omp"])
+    fake_sessions.screens["o-1"] = "\n".join(["Do you want to make this edit?", "❯ 1. Yes", "  2. No"])
+    c = client(fake_sessions)
+    refused = c.post("/api/sessions/o-1/answer", json={"key": "1", "question": "Do you want to make this edit?"}, headers=CHANGE)
+    assert refused.status_code == 409 and fake_sessions.sent == []
