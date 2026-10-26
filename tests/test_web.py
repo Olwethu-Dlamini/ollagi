@@ -58,6 +58,9 @@ class FakeSessions:
     def leave_scrollback(self, name):
         self.left_scrollback = getattr(self, "left_scrollback", []) + [name]
 
+    def leave_frozen_bottom(self, name):
+        self.released = getattr(self, "released", []) + [name]
+
     def send_key(self, name, key):
         from ollagi.sessions import ALLOWED_KEYS
 

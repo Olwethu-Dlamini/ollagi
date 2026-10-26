@@ -245,6 +245,14 @@ def leave_scrollback(name: str, run: Run = run_command) -> None:
     run(tmux(name, "if-shell", "-F", "-t", WINDOW, "#{pane_in_mode}", f"send-keys -t {WINDOW} -X cancel"))
 
 
+def leave_frozen_bottom(name: str, run: Run = run_command) -> None:
+    """Back to following the program if the session sits in scroll mode at the live screen: then the
+    view is frozen for every screen looking at it, while nobody is reading back. Someone scrolled up
+    to read is left where they are."""
+    frozen_at_bottom = "#{&&:#{pane_in_mode},#{==:#{scroll_position},0}}"
+    run(tmux(name, "if-shell", "-F", "-t", WINDOW, frozen_at_bottom, f"send-keys -t {WINDOW} -X cancel"))
+
+
 def send_text(name: str, text: str, press_enter: bool = True, run: Run = run_command) -> None:
     leave_scrollback(name, run=run)
     # -l sends the text literally: "Enter" typed as a word stays the word, it is not a key press.

@@ -488,6 +488,7 @@ def create_app(config: Config, machine=None, sessions_api=sessions, run_watcher=
         if sessions_api.scope_state(name)[0]:
             return await websocket.close(code=4409, reason=f"{name} is frozen; resume it first")
         await websocket.accept()
+        sessions_api.leave_frozen_bottom(name)  # a view frozen at the live screen would look stuck
         await terminal.relay(websocket, open_terminal(name, rows, cols),
                              to_bottom=lambda: sessions_api.leave_scrollback(name))
 

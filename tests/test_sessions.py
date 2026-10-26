@@ -168,6 +168,44 @@ def test_a_real_session_starts_shows_output_takes_input_and_stops(tmp_path):
     assert not (sessions.Path(f"/tmp/tmux-{os.getuid()}") / f"ollagi-{name}").exists()
 
 
+@needs_tmux
+def test_a_view_frozen_at_the_live_screen_comes_back_live(tmp_path):
+    """Found on 2026-10-26: a session sat in tmux's scroll mode at the bottom, so every screen looking
+    at it (phone and laptop) stopped following the program, which read as "ollagi is slow"."""
+    from ollagi import terminal
+
+    name = f"test-frz-{os.getpid()}"
+    sessions.start(name, str(tmp_path), ["sh", "-c", "seq 1 300; echo ready; exec sleep 60"])
+    in_mode = lambda: _pane(name, "#{pane_in_mode}") == "1"
+    try:
+        _wait_for(lambda: "ready" in sessions.screen(name))
+        # Entered the way a mouse selection enters it (no -e), while showing the live screen.
+        subprocess.run(sessions.tmux(name, "copy-mode", "-t", "main"), check=True)
+        # A wheel turned down in a real attached terminal must leave it, though nothing is left to scroll.
+        term = terminal.Terminal(terminal.session_command(name), 24, 80)
+        try:
+            _wait_for(lambda: bool(term.read()))
+            term.write(b"\x1b[<65;5;5M")
+            _wait_for(lambda: not in_mode())
+        finally:
+            term.close()
+        # Scrolled up to read: opening the session on the page must leave the reader where they are.
+        subprocess.run(sessions.tmux(name, "copy-mode", "-t", "main", "-u"), check=True)
+        sessions.leave_frozen_bottom(name)
+        assert in_mode()
+        # Back at the bottom but still in scroll mode: opening the session releases it.
+        subprocess.run(sessions.tmux(name, "send-keys", "-t", "main", "-X", "history-bottom"), check=True)
+        sessions.leave_frozen_bottom(name)
+        assert not in_mode()
+    finally:
+        sessions.stop(name)
+
+
+def _pane(name, format_):
+    return subprocess.run(sessions.tmux(name, "display", "-p", "-t", "main", format_),
+                          capture_output=True, text=True).stdout.strip()
+
+
 def _wait_for(condition, seconds=5.0):
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
