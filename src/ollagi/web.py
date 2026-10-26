@@ -4,7 +4,9 @@
     GET  /api/system                    memory, pressure, load, disks, heavy processes, Claude sessions
     GET  /api/sessions                  ollagi sessions with their state and memory
     GET  /api/sessions/{name}/screen    the end of a session's screen, as text
-    POST /api/sessions                  start a session   {"name", "directory", "force", "program": "claude" | "shell",
+    POST /api/sessions                  start a session   {"name", "directory", "force",
+                                                           "program": "agent" (the folder's agent, the default) |
+                                                                      "claude" | "omp" | "shell",
                                                            "resume": a conversation id from /api/conversations}
     POST /api/sessions/{name}/send      type into it      {"text"} or {"key"}
     POST /api/sessions/{name}/answer    press a menu key, only if that question is still on screen {"key", "question"}
@@ -56,7 +58,7 @@ from pydantic import BaseModel
 
 from collections import deque
 
-from ollagi import (access, claude_screen, desktop, grouping, notify, outside, queue as queueing, sessions, slack_outbox,
+from ollagi import (access, agents, claude_screen, desktop, grouping, notify, outside, queue as queueing, sessions, slack_outbox,
                     summary, system, terminal, watcher as watching, webpush)
 from ollagi.budget import Limits, how_many_can_start
 from ollagi.config import Config
@@ -94,7 +96,9 @@ class StartRequest(BaseModel):
     name: str = ""  # empty: named after the folder, like `ollagi here` (docs/decisions/0030)
     directory: str
     force: bool = False
-    program: str = "claude"  # or "shell": a plain terminal in the folder (docs/decisions/0027)
+    # "agent": whichever agent the config gives this folder (docs/decisions/0035); or an agent named
+    # outright ("claude", "omp"); or "shell": a plain terminal in the folder (docs/decisions/0027).
+    program: str = "agent"
     resume: str | None = None  # a conversation id from /api/conversations: `claude --resume` (0033)
 
 
@@ -345,6 +349,8 @@ def create_app(config: Config, machine=None, sessions_api=sessions, run_watcher=
         found = {}
         for name in sessions_api.names():
             info = sessions_api.info(name)
+            # omp tells its state through a hook, not its screen (docs/decisions/0036); until that is
+            # read, only Claude sessions are watched. Shells never are.
             if info.program != "claude":
                 continue
             reading = state_of(name, info)
@@ -392,28 +398,32 @@ def create_app(config: Config, machine=None, sessions_api=sessions, run_watcher=
 
     @app.post("/api/sessions")
     def start_session(body: StartRequest):
-        if body.program not in ("claude", "shell"):
-            raise HTTPException(400, "program must be \"claude\" or \"shell\"")
+        if body.program not in ("agent", "shell", *agents.NAMES):
+            raise HTTPException(400, f"program must be \"agent\", \"shell\" or one of: {', '.join(sorted(agents.NAMES))}")
+        program = config.agent_for(body.directory).name if body.program == "agent" else body.program
         # Checked before the budget, so a bad request is refused as bad even when memory is short.
-        if body.resume and (body.program != "claude" or body.resume not in {c.session_id for c in resumable(body.directory)}):
+        if body.resume and (program != "claude" or body.resume not in {c.session_id for c in resumable(body.directory)}):
             # Only an id the folder's own list offers: never an arbitrary word on claude's command line.
             raise HTTPException(400, "resume must name one of the folder's recent conversations")
-        # A shell is a few MiB and is not a Claude session, so the budget (made for Claude's 1.5 GiB)
+        # A shell is a few MiB and is not an agent session, so the budget (made for an agent's 1.5 GiB)
         # does not apply to it.
-        if body.program == "claude" and not body.force:
+        if program != "shell" and not body.force:
             memory, load = machine.memory(), machine.load()
             result = verdict(memory, load, find_sessions(machine.processes()))
             if not result.can_start:
                 raise HTTPException(409, f"no room for another session: {result.reason}")
-        if body.program == "shell":
+        if program == "shell":
             # One scratch shell per folder (docs/decisions/0031): a running one is handed back.
             for name in sessions_api.names():
                 info = sessions_api.info(name)
-                if info.program != "claude" and info.directory == body.directory and info.alive and not info.frozen:
+                if info.program not in agents.NAMES and info.directory == body.directory and info.alive and not info.frozen:
                     return {"started": name, "window": False, "reused": True}
-        command = ["claude"] if body.program == "claude" else [sessions.login_shell()]
-        if body.resume:
-            command = ["claude", "--resume", body.resume]
+        if program == "shell":
+            command = [sessions.login_shell()]
+        elif body.resume:
+            command = agents.get(program).resume(body.resume)
+        else:
+            command = agents.get(program).start()
         name = body.name.strip() or sessions.name_for(body.directory, sessions_api.names(), secrets.token_hex(2))
         try:
             sessions_api.start(name, body.directory, command)

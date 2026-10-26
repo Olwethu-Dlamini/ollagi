@@ -363,6 +363,44 @@ def test_a_shell_session_starts_my_login_shell_and_needs_no_room(fake_sessions, 
     assert other.get("reused") is None and other["started"] in fake_sessions.running
 
 
+def test_a_new_session_runs_the_folders_agent_from_the_config(fake_sessions):
+    # docs/decisions/0035: the page asks for "the agent"; the config decides which one.
+    c = client(fake_sessions, agent="omp")
+    started = c.post("/api/sessions", json={"name": "o-1", "directory": "/work/DATA!"}, headers=CHANGE)
+    assert started.status_code == 200
+    assert fake_sessions.commands["o-1"] == ["omp"]
+    listed = next(s for s in c.get("/api/sessions").json() if s["name"] == "o-1")
+    assert listed["program"] == "omp"
+    # An agent can still be named outright, whatever the default.
+    c.post("/api/sessions", json={"name": "c-1", "directory": "/w", "program": "claude"}, headers=CHANGE)
+    assert fake_sessions.commands["c-1"] == ["claude"]
+
+
+def test_an_omp_session_needs_room_like_a_claude_session(fake_sessions):
+    # The budget is for any agent; only a plain shell is let through with memory short.
+    c = client(fake_sessions, available_gib=1.0, agent="omp")
+    refused = c.post("/api/sessions", json={"name": "o-1", "directory": "/w"}, headers=CHANGE)
+    assert refused.status_code == 409
+    assert "o-1" not in fake_sessions.running
+
+
+def test_resume_is_refused_for_omp_until_its_conversations_can_be_listed(fake_sessions):
+    # The resume list holds Claude's conversation ids; passing one to omp would resume nothing.
+    c = client(fake_sessions, agent="omp")
+    refused = c.post("/api/sessions", json={"directory": "/work/DATA!/api", "resume": "conv-2"}, headers=CHANGE)
+    assert refused.status_code == 400
+
+
+def test_a_running_omp_session_is_not_handed_back_as_the_folders_scratch_shell(fake_sessions, monkeypatch):
+    # docs/decisions/0031 reuses a running shell in the folder; an agent session is not a shell.
+    monkeypatch.setattr("ollagi.sessions.login_shell", lambda: "/usr/bin/bash")
+    c = client(fake_sessions, agent="omp")
+    c.post("/api/sessions", json={"name": "o-1", "directory": "/w"}, headers=CHANGE)
+    shell = c.post("/api/sessions", json={"name": "sh-1", "directory": "/w", "program": "shell"}, headers=CHANGE).json()
+    assert shell.get("reused") is None and shell["started"] == "sh-1"
+    assert fake_sessions.commands["sh-1"] == ["/usr/bin/bash"]
+
+
 def test_changes_without_the_ollagi_header_are_refused(fake_sessions):
     response = client(fake_sessions).post("/api/sessions/demo/stop")
     assert response.status_code == 403

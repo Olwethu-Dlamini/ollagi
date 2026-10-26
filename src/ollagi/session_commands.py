@@ -1,13 +1,13 @@
 """Terminal commands for sessions: start, here, open, close, list, show, send, stop.
 
 These are thin: they read the arguments, call sessions.py, and print. `start` first asks the budget
-rule whether another session fits, and refuses unless --force is given. `here` starts Claude in the
-current folder and shows it in this terminal, like typing `claude`. `start` also opens a window on the
-laptop's desktop (docs/decisions/0017), `open` does that for a session already running and `close` closes
-its windows without stopping it.
+rule whether another session fits, and refuses unless --force is given. `here` starts the folder's agent
+in the current folder and shows it in this terminal, like typing `claude` or `omp`. `start` also opens a
+window on the laptop's desktop (docs/decisions/0017), `open` does that for a session already running and
+`close` closes its windows without stopping it.
 
-The program `here` runs is `claude`, or whatever OLLAGI_CLAUDE names (tests use a harmless shell;
-it could also be another command-line agent).
+The agent comes from the config (docs/decisions/0035): `agent = "omp"`, or a project's own choice.
+OLLAGI_CLAUDE, when set, names the program `here` runs instead (tests use a harmless shell).
 """
 
 import os
@@ -29,7 +29,7 @@ def cmd_start(args) -> int:
         if not verdict.can_start:
             print(f"not starting: {verdict.reason}\n(use --force to start anyway)")
             return 1
-    command = [sessions.login_shell()] if args.shell else (args.command or ["claude"])
+    command = [sessions.login_shell()] if args.shell else (args.command or config.load().agent_for(args.directory).start())
     sessions.start(args.name, args.directory, command)
     print(f"started {args.name} in {args.directory}: {' '.join(command)}")
     settings = config.load().desktop
@@ -63,8 +63,8 @@ def cmd_close(args) -> int:
 
 
 def cmd_here(args) -> int:
-    """Start Claude here through ollagi, then show it in this terminal, like running `claude`."""
-    program = os.environ.get("OLLAGI_CLAUDE", "claude")
+    """Start the folder's agent here through ollagi, then show it in this terminal, like running `claude`."""
+    program = os.environ.get("OLLAGI_CLAUDE") or config.load().agent_for(os.getcwd()).name
     if os.environ.get("TMUX"):
         # Already inside tmux (maybe an ollagi session itself): just run the program normally.
         os.execvp(program, [program, *args.claude_args])
@@ -115,18 +115,18 @@ def cmd_stop(args) -> int:
 
 
 def add_to(subparsers) -> None:
-    p = subparsers.add_parser("start", help="start a Claude Code session in tmux")
+    p = subparsers.add_parser("start", help="start an agent session (the config's agent: claude or omp) in tmux")
     p.add_argument("name", help="short name, e.g. sd-6641")
     p.add_argument("directory", help="the project folder to start in")
     p.add_argument("--force", action="store_true", help="start even if the budget says there is no room")
     p.add_argument("--no-window", action="store_true", help="do not open a terminal window on the desktop")
-    p.add_argument("--shell", action="store_true", help="a plain terminal (my login shell) instead of claude; needs no room")
-    p.add_argument("command", nargs="*", help="program to run instead of claude, after --")
+    p.add_argument("--shell", action="store_true", help="a plain terminal (my login shell) instead of the agent; needs no room")
+    p.add_argument("command", nargs="*", help="program to run instead of the configured agent, after --")
     p.set_defaults(handler=cmd_start)
 
-    p = subparsers.add_parser("here", help="start Claude in this folder through ollagi and show it here")
+    p = subparsers.add_parser("here", help="start this folder's agent through ollagi and show it here")
     p.add_argument("--name", help="session name (default: the folder's name plus 4 random characters)")
-    p.add_argument("claude_args", nargs="*", help="passed on to claude, after --, e.g. -- --continue")
+    p.add_argument("claude_args", nargs="*", help="passed on to the agent, after --, e.g. -- --continue")
     p.set_defaults(handler=cmd_here)
 
     p = subparsers.add_parser("open", help="show a running session in a terminal window on the desktop")

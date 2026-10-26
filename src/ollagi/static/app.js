@@ -206,10 +206,11 @@ $("new-form").onsubmit = async (event) => {
   $("new-error").textContent = "";
   const directory = $("new-dir").value.trim() || $("new-project").value;
   if (!directory) { $("new-error").textContent = "Choose a project or type a folder."; return; }
-  // Which button sent the form: Start Claude, or Start a terminal (a shell in the folder).
-  const program = event.submitter && event.submitter.id === "new-shell" ? "shell" : "claude";
+  // Which button sent the form: Start the folder's agent (claude or omp, from the config), or Start a
+  // terminal (a shell in the folder).
+  const program = event.submitter && event.submitter.id === "new-shell" ? "shell" : "agent";
   try {
-    const resume = program === "claude" ? $("new-resume").value || null : null;
+    const resume = program === "agent" ? $("new-resume").value || null : null;
     const started = await api("/api/sessions", { name: $("new-name").value.trim(), directory, force: $("new-force").checked, program, resume });
     $("new-sheet").hidden = true;
     $("new-name").value = "";
