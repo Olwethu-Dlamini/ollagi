@@ -1,7 +1,7 @@
 # Make `claude`, typed in an interactive terminal, start through ollagi (docs/decisions/0015).
 # The session then also shows on the ollagi page and the phone; it looks the same in the terminal.
 # Load it from ~/.bashrc with:
-#   [[ -r /run/media/oll/Linux/Projects/ollagi/deploy/claude-wrapper.bash ]] && source /run/media/oll/Linux/Projects/ollagi/deploy/claude-wrapper.bash
+#   [[ -r /media/oll/Linux/Projects/ollagi/deploy/claude-wrapper.bash ]] && source /media/oll/Linux/Projects/ollagi/deploy/claude-wrapper.bash
 # Skip it once with `command claude ...` or `OLLAGI_OFF=1 claude ...`.
 
 claude() {
