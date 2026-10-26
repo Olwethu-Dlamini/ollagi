@@ -19,15 +19,23 @@ Codex later, without a second copy of ollagi to maintain.
 - A typo (`agent = "opm"`) is refused when the file is read, not when a session would start at 2 am.
 - `/api/system` reports, for each project, the agent a new session there would run.
 
-This step only adds the description and the choice. Starting, watching and resuming an omp session
-follow in the next steps (0036 onwards).
+- Starting follows the choice: the page sends `"program": "agent"` ("whatever this folder runs"), and
+  `ollagi start` and `ollagi here` use the same rule. An agent can still be named outright (`"omp"`,
+  `"claude"`). The memory budget applies to every agent; only a plain shell is let through when memory
+  is short. A running agent session is never handed back as the folder's scratch shell (0031).
+- Resume stays Claude-only until omp's conversations can be listed: a Claude conversation id passed to
+  omp would resume nothing.
+
+Watching an omp session's state follows in decision 0036.
 
 ## Consequences
 
 - One repo, one page, several agents. Each agent still needs its own way of telling ollagi what state
   it is in (Claude: its screen; omp: decision 0036).
-- Undo: remove `agents.py` and the `agent` keys; nothing else reads them yet.
+- Undo: remove `agents.py` and the `agent` keys, and put `"claude"` back as the page's program.
 
 ## Checked
 
-2026-10-26: `tests/test_agents.py` (5 tests) and the whole suite: 262 passed, 3 skipped.
+2026-10-26: `tests/test_agents.py` (5 tests) and 4 page tests in `tests/test_web.py`. Each page test was
+run against the code with its rule removed (budget for Claude only; shell reuse keyed on "not claude")
+and failed; with the rule back, the whole suite: 266 passed, 3 skipped.
