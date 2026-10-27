@@ -765,16 +765,93 @@ async function loadJira(refresh) {
     $("jira-note").textContent = `${data.tickets} open tickets, ${data.groups.length} groups, read from Jira at ${read}. ` +
       "Read only: nothing here changes a ticket.";
     $("jira-project").hidden = false;
-    $("jira-groups").replaceChildren(...data.groups.map(groupCard));
+    $("jira-groups").replaceChildren(groupingExplained(data), ...data.groups.map(groupCard), aloneCard(data.ungrouped));
   } catch (error) {
     $("jira-note").textContent = error.message;
   }
   $("jira-load").textContent = "Reload";
 }
 
+// ---- How the tickets were grouped, drawn (docs/decisions/0040) ---------------------------------
+// One card per area of the code. The drawing is a tree: the area at the root, one branch per ticket. A
+// solid branch means the ticket's pull requests change that code; a dashed one that only the area map (its
+// title or epic) puts it there. Nothing crosses, so it reads on a phone. Built with DOM calls and
+// textContent only, like the rest of the page.
+const SVG = "http://www.w3.org/2000/svg";
+function svgEl(tag, attrs = {}, text = null) {
+  const node = document.createElementNS(SVG, tag);
+  for (const [name, value] of Object.entries(attrs)) node.setAttribute(name, value);
+  if (text != null) node.textContent = text;
+  return node;
+}
+
+const STATUS_CLASS = { "In Progress": "working", "To Be Checked": "frozen", "Done": "done" };
+const clip = (text, n) => (text.length > n ? text.slice(0, n - 1) + "…" : text);
+
+function areaTree(area, tickets) {
+  const ROW = 42, TOP = 50, X = 14, width = 360;
+  const height = TOP + ROW * (tickets.length - 1) + 26;
+  const root = svgEl("svg", { viewBox: `0 0 ${width} ${height}`, width, height, class: "tree", role: "img" });
+  root.append(svgEl("rect", { x: 1, y: 2, width: Math.min(width - 2, 26 + area.length * 8.4), height: 30, rx: 9, class: "root" }),
+    svgEl("text", { x: 13, y: 22, class: "rt" }, area));
+  const last = TOP + ROW * (tickets.length - 1);
+  root.append(svgEl("path", { d: `M ${X} 32 V ${last - 12}`, class: "trunk" }));
+  tickets.forEach((t, i) => {
+    const y = TOP + i * ROW, kind = t.main?.kind ?? "page";
+    root.append(svgEl("path", { d: `M ${X} ${y - 12} Q ${X} ${y} ${X + 12} ${y} H ${X + 26}`, class: `branch kind-${kind}` }));
+    root.append(svgEl("rect", { x: X + 26, y: y - 12, width: 86, height: 24, rx: 12, class: "pill" }),
+      svgEl("circle", { cx: X + 38, cy: y, r: 4, class: `st ${STATUS_CLASS[t.status] ?? "idle"}` }),
+      svgEl("text", { x: X + 48, y: y + 4, class: "k" }, t.key),
+      svgEl("text", { x: X + 122, y: y - 2, class: "d" }, clip(t.main?.detail ?? "", 30)),
+      svgEl("text", { x: X + 122, y: y + 13, class: "a" }, t.also?.length ? clip("also " + t.also.map((e) => e.area).join(", "), 32) : ""));
+  });
+  return root;
+}
+
+function groupingExplained(data) {
+  const all = [...data.groups.flatMap((g) => g.tickets), ...data.ungrouped];
+  const box = el("details", null, "jexplain");
+  box.append(el("summary", "How these groups were made"));
+  box.append(el("p", "Each ticket gets one main area of the code: where its pull requests change files, or, before it " +
+    "has one, the area its title or epic names in your area map. Tickets with the same main area are one group: " +
+    "worked together in one session, delivered one pull request per ticket.", "muted"));
+  const steps = el("div", null, "steps");
+  for (const s of ["your open tickets", "find each one's code", "pick its main area", "same area: one group", "one PR per ticket"]) {
+    steps.append(el("span", s, "step"));
+  }
+  box.append(steps);
+  for (const k of data.kinds) {
+    const row = el("div", null, "rulerow");
+    row.append(el("span", k.name, `chip kind-${k.id}`), el("span", k.text),
+      el("span", `${all.filter((t) => t.main?.kind === k.id).length} tickets`, "muted"));
+    box.append(row);
+  }
+  const broad = el("div", null, "rulerow");
+  broad.append(el("span", "broad", "chip kind-broad"),
+    el("span", "Cross-cutting areas (tests, CI, a shared widget) and folders the map does not know show as \"also\"; they never decide a group."));
+  const never = el("div", null, "rulerow");
+  never.append(el("span", "never", "chip kind-broad"), el("span", "Alike titles alone: tickets worded the same way can live in different code."));
+  box.append(broad, never);
+  return box;
+}
+
+function aloneCard(alone) {
+  const card = el("div", null, "jgroup");
+  card.append(el("p", `${alone.length} tickets on their own`, "why"));
+  for (const t of alone) {
+    const row = el("div", null, "alone");
+    const link = Object.assign(el("a", t.key, "key"), { href: t.url, target: "_blank", rel: "noopener" });
+    const text = el("span");
+    text.append(link, ` ${t.summary}`);
+    row.append(text, el("span", t.why, "muted"));
+    card.append(row);
+  }
+  return card;
+}
+
 function groupCard(g) {
   const card = el("div", null, "jgroup");
-  card.append(el("p", `${g.tickets.length} tickets · ${g.reason}`, "why"));
+  card.append(el("p", g.reason, "why"), areaTree(g.area, g.tickets));
   const ordered = [...g.tickets].sort((a, b) => WAITING_FOR_REVIEW.has(a.status) - WAITING_FOR_REVIEW.has(b.status));
   let ticked = 0;
   const boxes = ordered.map((t) => {

@@ -215,7 +215,8 @@ class CatTerminals:
 
 
 def client(fake_sessions, available_gib=8.0, jira=None, outbox=None, outside_api=None, windows=None, terminals=None,
-           summariser=None, notifier=None, omp_states=None, omp_conversations=(), omp_open=frozenset(), **config):
+           summariser=None, notifier=None, omp_states=None, omp_conversations=(), omp_open=frozenset(),
+           code_evidence=None, **config):
     from ollagi.web import create_app
 
     cfg = Config(projects=(Project("simedia", "/work/DATA!"),), **config)
@@ -229,7 +230,9 @@ def client(fake_sessions, available_gib=8.0, jira=None, outbox=None, outside_api
                      # Never the real ~/.omp: the folder's omp conversations are given per test.
                      omp_conversation_list=lambda directory, leave_out=frozenset(): [
                          c for c in omp_conversations if c.session_id not in leave_out],
-                     omp_open=lambda: omp_open)
+                     omp_open=lambda: omp_open,
+                     # Never real Bitbucket or the real area map: each ticket's code is given per test.
+                     code_evidence=code_evidence or (lambda tickets: {}))
     return TestClient(app, base_url="http://127.0.0.1:8765")
 
 
@@ -528,12 +531,17 @@ def test_a_task_needs_a_real_folder(fake_sessions):
     assert c.post("/api/queue", json={"directory": "/nope", "prompt": "x"}, headers=CHANGE).status_code == 400
 
 
-def test_tickets_are_grouped_and_jira_is_asked_at_most_every_five_minutes(fake_sessions):
+def test_tickets_sharing_code_are_grouped_and_jira_is_asked_at_most_every_five_minutes(fake_sessions):
+    from ollagi.code_areas import Evidence
+
     jira = FakeJira()
-    c = client(fake_sessions, jira=jira)
+    shop = lambda detail: [Evidence("Shop", "code", detail)]  # noqa: E731
+    c = client(fake_sessions, jira=jira, code_evidence=lambda tickets: {"T-1": shop("PR #1"), "T-2": shop("PR #2")})
     data = c.get("/api/jira/groups").json()
     assert [[t["key"] for t in g["tickets"]] for g in data["groups"]] == [["T-1", "T-2"]]
-    assert [t["key"] for t in data["ungrouped"]] == ["T-3"]
+    assert data["groups"][0]["area"] == "Shop"
+    assert data["groups"][0]["tickets"][0]["main"] == {"area": "Shop", "kind": "code", "detail": "PR #1", "broad": False}
+    assert [(t["key"], t["why"]) for t in data["ungrouped"]] == [("T-3", "no area found: no pull request yet, and its title names no area in the map")]
     c.get("/api/jira/groups")
     assert jira.calls == 1  # served from the cache
     c.get("/api/jira/groups?refresh=true")

@@ -198,6 +198,34 @@ textarea { font: 15px/1.4 var(--font); resize: vertical; }
 .jgroup .key { font-weight: 600; color: var(--text); }
 .jgroup .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; align-items: center; }
 .jgroup .actions button { padding: 8px 12px; border-radius: var(--r); border: 1px solid var(--line); background: none; font-size: 14px; }
+/* How the groups were made (docs/decisions/0040): one tree per area of the code. */
+:root { --kind-code: #2f7d4f; --kind-page: #3d6fb6; --kind-broad: #8a8a85; }
+@media (prefers-color-scheme: dark) { :root { --kind-code: #5cb37f; --kind-page: #79a3e0; } }
+.kind-code { --c: var(--kind-code); } .kind-page { --c: var(--kind-page); } .kind-broad { --c: var(--kind-broad); }
+.chip { display: inline-block; font-size: 12px; font-weight: 600; border-radius: 99px; padding: 1px 9px; margin: 2px 6px 2px 0;
+        color: var(--c); border: 1.5px solid var(--c); white-space: nowrap; }
+.chip.kind-page { border-style: dashed; }
+svg.tree { display: block; max-width: 100%; height: auto; margin: 6px 0 4px; }
+svg.tree .root { fill: var(--raised); }
+svg.tree .rt { fill: var(--text); font: 700 14px var(--font); }
+svg.tree .trunk { fill: none; stroke: var(--line); stroke-width: 3; }
+svg.tree .branch { fill: none; stroke: var(--c); stroke-width: 3; stroke-linecap: round; }
+svg.tree .branch.kind-page { stroke-dasharray: 6 5; }  /* from the map: weaker than a pull request's files */
+svg.tree .pill { fill: var(--surface); stroke: var(--line); stroke-width: 1.5; }
+svg.tree .k { fill: var(--text); font: 600 12px var(--font); }
+svg.tree .d { fill: var(--text); font: 12px var(--font); }
+svg.tree .a { fill: var(--muted); font: 11px var(--font); }
+svg.tree .st { fill: var(--idle); } svg.tree .st.working { fill: var(--working); }
+svg.tree .st.frozen { fill: var(--frozen); } svg.tree .st.done { fill: var(--done); }
+.jexplain { padding: 10px 0; border-top: 1px solid var(--line); }
+.jexplain summary { font-weight: 600; cursor: pointer; }
+.jexplain .steps { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 10px; }
+.jexplain .step { font-size: 12px; background: var(--raised); border-radius: var(--r); padding: 3px 8px; }
+.jexplain .step + .step::before { content: "→ "; color: var(--muted); }
+.jexplain .rulerow { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: baseline; padding: 5px 0;
+                     font-size: 13px; border-top: 1px dashed var(--line); }
+.alone { display: grid; gap: 2px; padding: 6px 0; font-size: 14px; border-top: 1px dashed var(--line); }
+.alone .muted { font-size: 12px; }
 
 /* ---- Slack outbox ------------------------------------------------------------------------ */
 .draft { padding: 12px 0; border-top: 1px solid var(--line); }

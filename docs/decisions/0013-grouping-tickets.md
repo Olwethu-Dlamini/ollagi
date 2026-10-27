@@ -1,5 +1,7 @@
 # 0013: Group similar Jira tickets with rules that can be read and checked
 
+Replaced by 0040 on 2026-10-27: tickets are grouped by the code they touch, not by their titles.
+
 Date: 2026-10-19
 
 ## Context

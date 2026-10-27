@@ -25,7 +25,7 @@ Early. Built in small steps, one idea per commit, so every part can be read and 
 | 5 | RAM watcher: freeze the heaviest session at red, thaw at green | done |
 | 5b | Overnight queue, one task at a time | done |
 | 5c | Sessions-first page (state dots, menu buttons, colours), after Collie and Codeman | done |
-| 6 | Jira: group my open tickets (read only), queue a group as one task | done |
+| 6 | Jira: group my open tickets by the code they touch (read only, 0040), queue a group as one task | done |
 | 6b | Slack outbox: drafts, one approved Send per message | done |
 | 7 | Projects from a config file | done |
 | 8 | `claude` in a terminal starts through ollagi (`ollagi here`) | done |

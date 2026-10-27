@@ -58,8 +58,9 @@ from pydantic import BaseModel
 
 from collections import deque
 
-from ollagi import (access, agents, claude_screen, desktop, grouping, notify, omp_conversations, omp_state, outside,
-                    queue as queueing, sessions, slack_outbox, summary, system, terminal, watcher as watching, webpush)
+from ollagi import (access, agents, claude_screen, code_areas, desktop, grouping, notify, omp_conversations, omp_state,
+                    outside, queue as queueing, sessions, slack_outbox, summary, system, terminal, watcher as watching,
+                    webpush)
 from ollagi.budget import Limits, how_many_can_start
 from ollagi.config import Config
 from ollagi.processes import find_sessions, read_processes
@@ -79,6 +80,25 @@ def page_file(request: Request, path: Path, media_type: str | None = None) -> Re
     if request.headers.get("if-none-match") == etag:
         return Response(status_code=304, headers=headers)
     return FileResponse(path, media_type=media_type, headers=headers)
+
+
+def real_code_evidence():
+    """Which code each ticket touches (docs/decisions/0040): its pull requests' files when Bitbucket answers,
+    the private area map always. One Bitbucket client for the page's life, so it remembers each pull
+    request's files instead of asking again."""
+    try:
+        bitbucket = code_areas.Bitbucket()
+    except (OSError, KeyError):  # no ~/.bitbucket.env: the area map alone
+        bitbucket = None
+
+    def evidence(tickets):
+        areas = code_areas.load_areas()  # read every time: an edit to the map shows on the next load
+        try:
+            return code_areas.evidence_for(tickets, areas, bitbucket)
+        except (OSError, ValueError, KeyError):  # Bitbucket down or a surprising answer: the map still works
+            return code_areas.evidence_for(tickets, areas, None)
+
+    return evidence
 
 
 def real_machine() -> SimpleNamespace:
@@ -166,7 +186,7 @@ def create_app(config: Config, machine=None, sessions_api=sessions, run_watcher=
                queue_store=None, run_queue=False, results_dir=None, jira_client=None,
                outbox=None, outside_api=outside, desktop_api=None, open_terminal=None, summarise=None,
                notifier=None, run_notifier=False, omp_states=None, omp_conversation_list=None,
-               omp_open=None) -> FastAPI:
+               omp_open=None, code_evidence=None) -> FastAPI:
     machine = machine or real_machine()
     # An omp session's state comes from the file its hook writes (docs/decisions/0036); tests pass
     # a function over a temporary folder.
@@ -590,15 +610,17 @@ def create_app(config: Config, machine=None, sessions_api=sessions, run_watcher=
             raise HTTPException(404, f"no saved result for task {task_id}")
         return {"id": task_id, "text": path.read_text()}
 
-    jira_cache = {"time": 0.0, "tickets": []}
+    jira_cache = {"time": 0.0, "tickets": [], "evidence": {}}
+    code_evidence = code_evidence or real_code_evidence()
 
     def my_tickets(refresh: bool = False):
-        """Open tickets, read from Jira at most every 5 minutes unless a refresh is asked for."""
+        """Open tickets and the code each touches, read at most every 5 minutes unless a refresh is asked for."""
         if refresh or time.time() - jira_cache["time"] > JIRA_CACHE_SECONDS:
             from ollagi.jira import Jira
 
             client = jira_client or Jira()
-            jira_cache.update(time=time.time(), tickets=client.my_open_tickets())
+            tickets = client.my_open_tickets()
+            jira_cache.update(time=time.time(), tickets=tickets, evidence=code_evidence(tickets))
         return jira_cache["tickets"]
 
     @app.get("/api/jira/groups")
@@ -607,13 +629,21 @@ def create_app(config: Config, machine=None, sessions_api=sessions, run_watcher=
             tickets = my_tickets(refresh)
         except (OSError, KeyError, ValueError) as error:  # no ~/.jira.env, no network, a bad answer
             raise HTTPException(502, f"could not read Jira: {error}") from error
-        groups = grouping.group(tickets)
+        evidence = jira_cache["evidence"]
+        groups = grouping.group(tickets, evidence)
         grouped = {t.key for g in groups for t in g.tickets}
+
+        def shown(t):
+            main = grouping.main_area(t, evidence)
+            return {**asdict(t), "main": asdict(main) if main else None,
+                    "also": [asdict(e) for e in grouping.also_touches(t, evidence)]}
+
         return {
             "read_at": jira_cache["time"],
             "tickets": len(tickets),
-            "groups": [{"reason": g.reason, "tickets": [asdict(t) for t in g.tickets]} for g in groups],
-            "ungrouped": [asdict(t) for t in tickets if t.key not in grouped],
+            "kinds": grouping.KINDS,
+            "groups": [{"area": g.area, "reason": g.reason, "tickets": [shown(t) for t in g.tickets]} for g in groups],
+            "ungrouped": [{**shown(t), "why": grouping.why_alone(t, evidence)} for t in tickets if t.key not in grouped],
         }
 
     @app.post("/api/jira/queue")
