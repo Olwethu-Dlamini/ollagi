@@ -11,11 +11,18 @@
 // The states are ollagi's own (src/ollagi/claude_screen.py):
 //   idle       the session opened, nothing has happened yet
 //   working    a turn is running
-//   needs_you  omp is asking something (the ask tool, or a tool waiting for approval)
+//   needs_you  omp is asking something (the ask tool, a tool waiting for approval, or another extension's
+//              dialog announced on omp's shared event bus, below)
 //   done       the turn finished; omp waits for the next message
 //
 // It only acts in sessions ollagi started: ollagi sets OLLAGI_SESSION=<name> on the tmux session, so an
 // omp run anywhere else is left alone. Subagents are ignored: their tool calls are not the session's.
+//
+// Another extension's dialog (a hook's ctx.ui.confirm or select) is invisible to this hook, so the session
+// would read "working" while it waits for you (decision 0039). Such an extension announces it on the bus
+// every hook and extension in one omp process shares, and this hook reports it:
+//   pi.events.emit("ui:waiting", { question: string, options: string[] })   just before the dialog
+//   pi.events.emit("ui:answered", {})                                        once it is answered
 // Install: link this file into ~/.omp/agent/hooks/post/ (omp loads hooks from hooks/pre and hooks/post).
 import { mkdirSync, renameSync, unlinkSync, writeFileSync, appendFileSync } from "node:fs";
 import { join } from "node:path";
@@ -72,6 +79,7 @@ interface HookApi {
 	on(event: "session_start" | "agent_start" | "agent_end" | "session_shutdown", handler: (event: unknown, ctx: Ctx) => void): void;
 	on(event: "tool_call" | "tool_result", handler: (event: ToolEvent, ctx: Ctx) => void): void;
 	on(event: "tool_approval_requested" | "tool_approval_resolved", handler: (event: { toolName?: string }, ctx: Ctx) => void): void;
+	events?: { on(event: string, handler: (data: unknown) => void): void };
 }
 
 const isSub = (ctx: Ctx) => ctx?.agent?.kind === "sub";
@@ -91,6 +99,13 @@ export default function (pi: HookApi): void {
 		const { question, options } = askOf(event.input);
 		write("needs_you", question, options);
 	});
+	pi.events?.on("ui:waiting", data => {
+		const d = (data ?? {}) as { question?: unknown; options?: unknown };
+		const question = typeof d.question === "string" ? d.question : "omp is waiting for you";
+		const options = Array.isArray(d.options) ? d.options.filter((o): o is string => typeof o === "string") : [];
+		write("needs_you", question, options);
+	});
+	pi.events?.on("ui:answered", () => write("working"));
 	pi.on("tool_result", (event, ctx) => { if (!isSub(ctx) && event.toolName === "ask") write("working"); });
 	pi.on("tool_approval_requested", (event, ctx) => {
 		if (!isSub(ctx)) write("needs_you", `Allow ${event.toolName ?? "a tool"}?`, []);
