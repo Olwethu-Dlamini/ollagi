@@ -22,10 +22,10 @@
     GET  /api/queue/{id}/result         a finished task's final screen, as text
     GET  /api/jira/groups               my open Jira tickets, grouped (read only, cached 5 minutes)
     POST /api/jira/queue                queue chosen tickets as one task {"keys", "directory"}
-    GET  /api/outside                   Claude sessions started outside ollagi (from Claude's own files)
+    GET  /api/outside                   Claude and omp sessions started outside ollagi (their own files)
     GET  /api/conversations?directory=  a folder's recent Claude conversations, to resume one
     GET  /api/outside/{pid}/conversation   that session's recent conversation, read only
-    POST /api/outside/{pid}/takeover    end it in its window, reopen it in ollagi {"confirm_name"}
+    POST /api/outside/{pid}/takeover    end it in its window, reopen it in ollagi {"confirm_name"}; Claude only
     GET  /api/slack/drafts              the Slack outbox
     POST /api/slack/drafts              add a draft       {"channel", "text", "thread_ts"}
     POST /api/slack/drafts/{id}/edit | /preview | /discard
@@ -186,7 +186,7 @@ def create_app(config: Config, machine=None, sessions_api=sessions, run_watcher=
                queue_store=None, run_queue=False, results_dir=None, jira_client=None,
                outbox=None, outside_api=outside, desktop_api=None, open_terminal=None, summarise=None,
                notifier=None, run_notifier=False, omp_states=None, omp_conversation_list=None,
-               omp_open=None, code_evidence=None) -> FastAPI:
+               omp_open=None, omp_outside=None, code_evidence=None) -> FastAPI:
     machine = machine or real_machine()
     # An omp session's state comes from the file its hook writes (docs/decisions/0036); tests pass
     # a function over a temporary folder.
@@ -194,6 +194,8 @@ def create_app(config: Config, machine=None, sessions_api=sessions, run_watcher=
     # Resume for omp (docs/decisions/0037): its conversation files, and the ones running sessions hold.
     omp_conversation_list = omp_conversation_list or omp_conversations.recent
     omp_open = omp_open or omp_state.open_conversations
+    # omp sessions started in a terminal window (docs/decisions/0041), found in /proc.
+    omp_outside = omp_outside or omp_conversations.running
     # Windows on this laptop for a session (docs/decisions/0017). Only the page's Start and the
     # open/close button use them; the overnight queue never opens one.
     laptop = desktop_api or desktop.Laptop(config.desktop)
@@ -433,8 +435,10 @@ def create_app(config: Config, machine=None, sessions_api=sessions, run_watcher=
     def resumable(directory: str, program: str):
         """A folder's recent conversations for that agent, without any a running session has open."""
         if program == "omp":
-            # docs/decisions/0037: omp's own files, minus conversations open in a running omp session.
-            return omp_conversation_list(directory, leave_out=omp_open())
+            # docs/decisions/0037: omp's own files, minus conversations open in a running omp session,
+            # whether ollagi started it or it runs in a terminal window (0041).
+            held = omp_open() | {s.session_id for s in omp_outside()}
+            return omp_conversation_list(directory, leave_out=held)
         if program != "claude":
             return []
         running = {s.session_id for s in outside_api.list_sessions()}
@@ -660,7 +664,8 @@ def create_app(config: Config, machine=None, sessions_api=sessions, run_watcher=
     def outside_sessions():
         managed = {s.pid for s in find_sessions(machine.processes()) if _is_managed(machine, s.pid)}
         memory = {s.pid: s.tree_rss for s in find_sessions(machine.processes())}
-        return [s for s in outside_api.list_sessions() if s.pid not in managed], memory
+        found = [*outside_api.list_sessions(), *omp_outside()]
+        return [s for s in found if s.pid not in managed], memory
 
     @app.get("/api/conversations")
     def conversations(directory: str):
@@ -680,12 +685,15 @@ def create_app(config: Config, machine=None, sessions_api=sessions, run_watcher=
         found, _ = outside_sessions()
         match = next((s for s in found if s.pid == pid), None)
         if match is None:
-            raise HTTPException(404, f"no Claude session with pid {pid} outside ollagi")
+            raise HTTPException(404, f"no agent session with pid {pid} outside ollagi")
         return match
 
     @app.get("/api/outside/{pid}/conversation")
     def outside_conversation(pid: int):
         s = find_outside(pid)
+        if s.program == "omp":
+            title, items = omp_conversations.parse_conversation(outside.read_tail(Path(s.transcript)))
+            return {"title": title, "items": [asdict(i) for i in items]}
         path = outside_api.transcript_path(s.session_id)
         if path is None:
             return {"title": None, "items": []}
@@ -695,6 +703,9 @@ def create_app(config: Config, machine=None, sessions_api=sessions, run_watcher=
     @app.post("/api/outside/{pid}/takeover")
     def take_over(pid: int, body: TakeoverRequest):
         s = find_outside(pid)
+        if s.program != "claude":
+            # docs/decisions/0041: omp reports no idle outside ollagi, and the reopen below is Claude's.
+            raise HTTPException(409, f"{s.name} runs {s.program}, which can be read here but not taken over")
         if body.confirm_name != s.name:
             raise HTTPException(409, "the typed name does not match; nothing was changed")
         if s.status != "idle":

@@ -68,6 +68,9 @@ mkdir -p ~/.omp/agent/hooks/post
 ln -sfn "$PWD/deploy/omp/ollagi-state.ts" ~/.omp/agent/hooks/post/ollagi-state.ts   # inert outside ollagi
 ```
 
+An omp typed into a plain terminal shows on the page too, with its conversation, but read only: it cannot
+be taken over like a terminal Claude, because omp reports no busy or idle outside ollagi (decision 0041).
+
 Phone access, once (decision 0007):
 
 ```bash

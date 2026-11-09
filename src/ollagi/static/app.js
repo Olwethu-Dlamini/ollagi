@@ -45,8 +45,8 @@ const STATES = {
 
 // ---- page state ----------------------------------------------------------------------------
 let whoami = null, phoneUrl = null, sessions = [], projects = [], filter = "All", current = null;
-let outsideSessions = [];  // Claude sessions started in a terminal window, from Claude's own files
-let claudeProcesses = [];  // every Claude process the server sees (from /api/system)
+let outsideSessions = [];  // Claude and omp sessions started in a terminal window, from their own files
+let claudeProcesses = [];  // every agent process (Claude, omp) the server sees (from /api/system)
 
 // ---- top bar and tabs ------------------------------------------------------------------------
 function showView(name) {
@@ -73,11 +73,11 @@ function renderSessions() {
   // The lists themselves are still fetched (the session's header and switcher read them), and
   // closing the session draws the list fresh.
   if (current) return;
-  // Claude processes that are neither ollagi's nor in Claude's own session files (rare). Drawn here,
+  // Agent processes that are neither ollagi's nor found as a session in a terminal (rare). Drawn here,
   // after both lists are loaded: the two requests run at the same time and either may finish first.
   const known = new Set(outsideSessions.map((o) => o.pid));
   const others = claudeProcesses.filter((c) => !c.managed && !known.has(c.pid));
-  $("outside").textContent = others.length ? `Also running: ${others.length} other Claude process(es).` : "";
+  $("outside").textContent = others.length ? `Also running: ${others.length} other agent process(es).` : "";
 
   // Both kinds share one list: ollagi's own sessions, and those started in a terminal window.
   const all = [...sessions, ...outsideSessions.map((o) => ({ ...o, outside: true }))];
@@ -139,14 +139,17 @@ function sessionRow(s) {
 }
 
 // ---- sessions started in a terminal window ------------------------------------------------------
+// omp reports no busy or idle outside ollagi (docs/decisions/0041), so its row and sheet leave the word out.
 const OUTSIDE_WORD = { busy: "working", waiting: "waiting for you", idle: "idle" };
+function outsideWord(s) { return isClaude(s) ? OUTSIDE_WORD[s.status] || s.status : ""; }
 
 function outsideRow(s) {
   const row = el("button", null, `row ${s.state}`);
   const name = el("span", s.name, "name");
   name.append(el("span", "terminal", "tag"));
+  if (!isClaude(s)) name.append(el("span", s.program, "tag"));
   row.append(el("span", null, `dot ${s.state}`), name,
-             el("span", [OUTSIDE_WORD[s.status] || s.status, age(s.age_seconds), size(s.memory)].join(" · "), "sub"));
+             el("span", [outsideWord(s), age(s.age_seconds), size(s.memory)].filter(Boolean).join(" · "), "sub"));
   row.onclick = () => openOutside(s.pid);
   return row;
 }
@@ -156,8 +159,9 @@ async function openOutside(pid) {
   if (!s) return;
   $("outside-error").textContent = "";
   $("outside-sheet").hidden = false;
-  $("outside-sub").textContent = `${s.name} · ${OUTSIDE_WORD[s.status] || s.status} · ${s.cwd}`;
-  $("outside-takeover").hidden = s.status !== "idle";  // idle only: never cut off work in progress
+  $("outside-sub").textContent = [s.name, outsideWord(s), s.cwd].filter(Boolean).join(" · ");
+  $("outside-takeover").hidden = s.status !== "idle";  // idle only: never cut off work in progress (omp: never)
+  $("outside-takeover-note").hidden = !isClaude(s);  // omp sessions here cannot be taken over (docs/decisions/0041)
   $("outside-takeover").onclick = () => takeOver(s);
   const c = await api(`/api/outside/${pid}/conversation`);
   $("outside-title").textContent = c.title || s.name;

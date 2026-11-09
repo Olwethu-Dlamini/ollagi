@@ -34,9 +34,11 @@ class OutsideSession:
     session_id: str
     name: str
     cwd: str
-    status: str  # "busy" or "idle", as Claude Code reports it
+    status: str  # "busy" or "idle", as Claude Code reports it; "unknown" for omp, which reports neither
     started: float  # seconds
     updated: float
+    program: str = "claude"
+    transcript: str = ""  # the conversation file, when known up front (omp: the one the process holds open)
 
 
 @dataclass(frozen=True)

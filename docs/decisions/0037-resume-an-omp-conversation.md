@@ -24,7 +24,8 @@ The New sheet offers a folder's recent Claude conversations to resume (0033). A 
 
 - Resume from the phone works for both agents.
 - An omp started in a plain terminal, outside ollagi, has no state file, so its conversation is not left
-  out. Start omp through ollagi (`ollagi here`) to be covered.
+  out. Start omp through ollagi (`ollagi here`) to be covered. (Covered since 0041: such sessions are
+  found in `/proc` and their open conversation is left out too.)
 - Undo: `resumable()` back to Claude-only and remove `omp_conversations.py`.
 
 ## Checked

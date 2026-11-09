@@ -216,7 +216,7 @@ class CatTerminals:
 
 def client(fake_sessions, available_gib=8.0, jira=None, outbox=None, outside_api=None, windows=None, terminals=None,
            summariser=None, notifier=None, omp_states=None, omp_conversations=(), omp_open=frozenset(),
-           code_evidence=None, **config):
+           omp_outside=(), code_evidence=None, **config):
     from ollagi.web import create_app
 
     cfg = Config(projects=(Project("simedia", "/work/DATA!"),), **config)
@@ -231,6 +231,8 @@ def client(fake_sessions, available_gib=8.0, jira=None, outbox=None, outside_api
                      omp_conversation_list=lambda directory, leave_out=frozenset(): [
                          c for c in omp_conversations if c.session_id not in leave_out],
                      omp_open=lambda: omp_open,
+                     # Never the real /proc: omp sessions in a terminal are given per test.
+                     omp_outside=lambda: list(omp_outside),
                      # Never real Bitbucket or the real area map: each ticket's code is given per test.
                      code_evidence=code_evidence or (lambda tickets: {}))
     return TestClient(app, base_url="http://127.0.0.1:8765")
@@ -608,6 +610,51 @@ def test_take_over_needs_the_exact_name_and_an_idle_session(fake_sessions):
     assert done["session"] == "api-12"  # folder name plus the old name's ending
     assert fake_sessions.running["api-12"] == "/work/DATA!/api"
     assert fake_sessions.commands["api-12"] == ["claude", "--resume", "conv-1"]  # the same conversation
+
+
+def omp_in_a_terminal(tmp_path, pid=950, conversation_id="01a1-live", status="unknown"):
+    """An omp session started in a terminal (docs/decisions/0041), with a real conversation file."""
+    import json
+
+    from ollagi.outside import OutsideSession
+
+    path = tmp_path / f"2026-11-09T06-35-42-955Z_{conversation_id}.jsonl"
+    path.write_text("\n".join(json.dumps(line) for line in [
+        {"type": "session", "id": conversation_id, "cwd": "/work/DATA!/api"},
+        {"type": "message", "message": {"role": "user", "content": [{"type": "text", "text": "continue the 2FA tickets"}]}},
+        {"type": "message", "message": {"role": "assistant", "content": [{"type": "text", "text": "Picking up SD-7477."}]}},
+    ]) + "\n")
+    return OutsideSession(pid, conversation_id, "2FA tickets", "/work/DATA!/api", status, 1000.0, 2000.0,
+                          program="omp", transcript=str(path))
+
+
+def test_omp_sessions_started_in_a_terminal_are_listed_next_to_claudes_with_their_conversation(fake_sessions, tmp_path):
+    c = client(fake_sessions, omp_outside=[omp_in_a_terminal(tmp_path)])
+    listed = {s["pid"]: (s["program"], s["name"], s["project"]) for s in c.get("/api/outside").json()}
+    assert listed == {900: ("claude", "work-12", "simedia"), 950: ("omp", "2FA tickets", "simedia")}
+    assert c.get("/api/outside/950/conversation").json()["items"] == [
+        {"role": "you", "text": "continue the 2FA tickets"}, {"role": "claude", "text": "Picking up SD-7477."}]
+
+
+@pytest.mark.parametrize("status", ["unknown", "idle"])
+def test_an_omp_session_in_a_terminal_is_never_taken_over(fake_sessions, tmp_path, status):
+    # omp reports no busy or idle outside ollagi, so ending it could cut off a turn in progress; and
+    # taking over reopens with `claude --resume`, which an omp conversation id would not resume.
+    claude = FakeOutside()
+    c = client(fake_sessions, outside_api=claude, omp_outside=[omp_in_a_terminal(tmp_path, status=status)])
+    refused = c.post("/api/outside/950/takeover", json={"confirm_name": "2FA tickets"}, headers=CHANGE)
+    assert refused.status_code == 409
+    assert "omp" in refused.json()["detail"]
+    assert claude.ended == []
+    assert getattr(fake_sessions, "commands", {}) == {}  # nothing reopened
+
+
+def test_a_conversation_open_in_an_omp_terminal_is_not_offered_for_resume(fake_sessions, tmp_path):
+    # Two omp processes writing one file would corrupt it (docs/decisions/0037).
+    conversations = (Conversation("01a1-live", "2FA tickets", 2000.0), Conversation("01a1-free", "Older", 1000.0))
+    c = client(fake_sessions, agent="omp", omp_conversations=conversations, omp_outside=[omp_in_a_terminal(tmp_path)])
+    offered = [x["session_id"] for x in c.get("/api/conversations", params={"directory": "/w"}).json()["conversations"]]
+    assert offered == ["01a1-free"]
 
 
 def test_a_session_started_from_the_page_also_opens_on_the_laptop(fake_sessions):
