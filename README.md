@@ -48,6 +48,7 @@ Early. Built in small steps, one idea per commit, so every part can be read and 
 | 10a | omp sessions count for the memory budget and the RAM watcher | done |
 | 10b | omp's state from a hook (idle, working, needs you with the question, done); the queue follows it | done |
 | 10c | Resume an earlier omp conversation from the New sheet | done |
+| 10d | `omp` typed in a terminal starts through ollagi too, so it is live on the phone and the laptop (`ollagi here --agent`) | done |
 
 ## Try it
 
@@ -68,8 +69,18 @@ mkdir -p ~/.omp/agent/hooks/post
 ln -sfn "$PWD/deploy/omp/ollagi-state.ts" ~/.omp/agent/hooks/post/ollagi-state.ts   # inert outside ollagi
 ```
 
-An omp typed into a plain terminal shows on the page too, with its conversation, but read only: it cannot
-be taken over like a terminal Claude, because omp reports no busy or idle outside ollagi (decision 0041).
+To have `claude` and `omp` typed in a terminal start through ollagi, live on the page and the phone as
+well as in that terminal (decisions 0015, 0042), put `ollagi` on the PATH and load the wrapper once:
+
+```bash
+ln -sfn "$PWD/.venv/bin/ollagi" ~/.local/bin/ollagi
+cp -n ~/.bashrc ~/.bashrc.before-ollagi
+echo "[[ -r $PWD/deploy/agent-wrapper.bash ]] && source $PWD/deploy/agent-wrapper.bash" >> ~/.bashrc
+```
+
+Ctrl-] then d leaves such a session running without the terminal; `command omp` skips ollagi once. An omp
+started without the wrapper still shows on the page with its conversation, but read only: it cannot be
+taken over like a terminal Claude, because omp reports no busy or idle outside ollagi (decision 0041).
 
 Phone access, once (decision 0007):
 

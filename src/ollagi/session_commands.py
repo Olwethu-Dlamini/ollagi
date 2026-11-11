@@ -7,6 +7,7 @@ window on the laptop's desktop (docs/decisions/0017), `open` does that for a ses
 `close` closes its windows without stopping it.
 
 The agent comes from the config (docs/decisions/0035): `agent = "omp"`, or a project's own choice.
+`here --agent` overrides it, so the shell wrappers start the agent that was typed (docs/decisions/0042).
 OLLAGI_CLAUDE, when set, names the program `here` runs instead (tests use a harmless shell).
 """
 
@@ -15,7 +16,7 @@ import secrets
 import sys
 import time
 
-from ollagi import config, desktop, sessions
+from ollagi import agents, config, desktop, sessions
 from ollagi.budget import Limits, how_many_can_start
 from ollagi.processes import find_sessions, read_processes
 from ollagi.system import MIB, read_load, read_memory
@@ -63,8 +64,8 @@ def cmd_close(args) -> int:
 
 
 def cmd_here(args) -> int:
-    """Start the folder's agent here through ollagi, then show it in this terminal, like running `claude`."""
-    program = os.environ.get("OLLAGI_CLAUDE") or config.load().agent_for(os.getcwd()).name
+    """Start an agent here through ollagi, then show it in this terminal, like running `claude` or `omp`."""
+    program = os.environ.get("OLLAGI_CLAUDE") or args.agent or config.load().agent_for(os.getcwd()).name
     if os.environ.get("TMUX"):
         # Already inside tmux (maybe an ollagi session itself): just run the program normally.
         os.execvp(program, [program, *args.claude_args])
@@ -126,6 +127,7 @@ def add_to(subparsers) -> None:
 
     p = subparsers.add_parser("here", help="start this folder's agent through ollagi and show it here")
     p.add_argument("--name", help="session name (default: the folder's name plus 4 random characters)")
+    p.add_argument("--agent", choices=sorted(agents.NAMES), help="the agent to start (default: the folder's agent from the config)")
     p.add_argument("claude_args", nargs="*", help="passed on to the agent, after --, e.g. -- --continue")
     p.set_defaults(handler=cmd_here)
 
